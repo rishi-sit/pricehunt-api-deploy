@@ -2,8 +2,8 @@ services:
   - type: web
     name: pricehunt-api
     env: python
-    buildCommand: "pip install -r api_requirements.txt && playwright install chromium && playwright install-deps"
-    startCommand: "python api_server.py"
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn api_server_lite:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
