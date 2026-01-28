@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PriceHunt - Smart Price Comparison</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Animated background -->
+        <div class="bg-gradient"></div>
+        <div class="bg-grid"></div>
+        
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </svg>
+                </div>
+                <span class="logo-text">PriceHunt</span>
+            </div>
+            <div class="header-info">
+                <span class="pincode-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                        <circle cx="12" cy="10" r="3"/>
+                    </svg>
+                    <span id="current-pincode">560087</span>
+                </span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Hero Section -->
+            <section class="hero">
+                <h1 class="hero-title">
+                    Find the <span class="gradient-text">Best Prices</span><br>
+                    Across All Platforms
+                </h1>
+                <p class="hero-subtitle">
+                    Compare prices instantly from Amazon, Flipkart, Zepto, Instamart & Blinkit
+                </p>
+            </section>
+
+            <!-- Search Section -->
+            <section class="search-section">
+                <div class="search-container">
+                    <div class="search-mode-toggle">
+                        <button class="mode-btn active" data-mode="single">Single Product</button>
+                        <button class="mode-btn" data-mode="bulk">Multiple Products</button>
+                    </div>
+                    
+                    <!-- Single Product Search -->
+                    <div class="search-box" id="single-search">
+                        <div class="search-input-wrapper">
+                            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"/>
+                                <path d="m21 21-4.35-4.35"/>
+                            </svg>
+                            <input 
+                                type="text" 
+                                id="search-input" 
+                                class="search-input" 
+                                placeholder="Search for any product... (e.g., milk, bread, iPhone)"
+                                autocomplete="off"
+                            >
+                            <button class="search-btn" id="search-btn">
+                                <span>Compare</span>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Bulk Search -->
+                    <div class="search-box hidden" id="bulk-search">
+                        <div class="bulk-input-wrapper">
+                            <textarea 
+                                id="bulk-input" 
+                                class="bulk-input" 
+                                placeholder="Enter products (one per line)&#10;Example:&#10;Amul Butter&#10;Tata Salt&#10;Maggi Noodles"
+                                rows="5"
+                            ></textarea>
+                            <div class="bulk-actions">
+                                <span class="product-count">0 products</span>
+                                <button class="search-btn" id="bulk-search-btn">
+                                    <span>Compare All</span>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M5 12h14M12 5l7 7-7 7"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Pincode Input -->
+                    <div class="pincode-section">
+                        <label for="pincode-input">Delivery Pincode:</label>
+                        <input 
+                            type="text" 
+                            id="pincode-input" 
+                            class="pincode-input" 
+                            value="560087" 
+                            maxlength="6"
+                            pattern="[0-9]{6}"
+                        >
+                    </div>
+                </div>
+            </section>
+
+            <!-- Platform Pills -->
+            <section class="platforms-section">
+                <div class="platforms-container">
+                    <div class="platform-pill" style="--platform-color: #FF9900;">
+                        <span class="platform-dot"></span>
+                        <span>Amazon</span>
+                    </div>
+                    <div class="platform-pill" style="--platform-color: #2874F0;">
+                        <span class="platform-dot"></span>
+                        <span>Flipkart</span>
+                    </div>
+                    <div class="platform-pill" style="--platform-color: #0078AD;">
+                        <span class="platform-dot"></span>
+                        <span>JioMart</span>
+                    </div>
+                    <div class="platform-pill" style="--platform-color: #84C225;">
+                        <span class="platform-dot"></span>
+                        <span>BigBasket</span>
+                    </div>
+                    <div class="platform-pill" style="--platform-color: #8B5CF6;">
+                        <span class="platform-dot"></span>
+                        <span>Zepto</span>
+                    </div>
+                    <div class="platform-pill" style="--platform-color: #FC8019;">
+                        <span class="platform-dot"></span>
+                        <span>Instamart</span>
+                    </div>
+                    <div class="platform-pill" style="--platform-color: #F8CB46;">
+                        <span class="platform-dot"></span>
+                        <span>Blinkit</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Loading State -->
+            <section class="loading-section hidden" id="loading-section">
+                <div class="loader">
+                    <div class="loader-ring"></div>
+                    <div class="loader-ring"></div>
+                    <div class="loader-ring"></div>
+                </div>
+                <p class="loading-text">Hunting for the best prices...</p>
+                <div class="loading-platforms">
+                    <span class="loading-platform" data-platform="amazon">Amazon</span>
+                    <span class="loading-platform" data-platform="flipkart">Flipkart</span>
+                    <span class="loading-platform" data-platform="jiomart">JioMart</span>
+                    <span class="loading-platform" data-platform="bigbasket">BigBasket</span>
+                    <span class="loading-platform" data-platform="zepto">Zepto</span>
+                    <span class="loading-platform" data-platform="instamart">Instamart</span>
+                    <span class="loading-platform" data-platform="blinkit">Blinkit</span>
+                </div>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-section hidden" id="results-section">
+                <!-- Results will be injected here -->
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Built with precision • Prices may vary based on availability and location</p>
+        </footer>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
+

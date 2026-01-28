@@ -1,0 +1,397 @@
+"""
+FastAPI server to provide product search API for Android app.
+Uses the existing scrapers with Playwright to bypass anti-bot protection.
+
+NEW in v2.0:
+- Gemini AI-powered smart search filtering
+- Cross-platform product matching
+- Natural language query understanding
+"""
+from fastapi import FastAPI, Query, Body, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from typing import List, Dict, Optional, Any
+from pydantic import BaseModel
+import asyncio
+from app.scrapers.amazon import AmazonScraper
+from app.scrapers.amazon_fresh import AmazonFreshScraper
+from app.scrapers.flipkart import FlipkartScraper
+from app.scrapers.flipkart_minutes import FlipkartMinutesScraper
+from app.scrapers.bigbasket import BigBasketScraper
+from app.scrapers.jiomart import JioMartScraper
+from app.scrapers.jiomart_quick import JioMartQuickScraper
+from app.scrapers.zepto import ZeptoScraper
+from app.scrapers.blinkit import BlinkitScraper
+from app.scrapers.instamart import InstamartScraper
+
+# AI-powered modules
+from app.smart_search import get_smart_search
+from app.product_matcher import get_product_matcher
+from app.gemini_service import get_gemini_service
+
+
+# Request/Response models
+class ProductInput(BaseModel):
+    """Product data from Android scraping"""
+    name: str
+    price: float
+    original_price: Optional[float] = None
+    discount: Optional[str] = None
+    platform: str
+    url: Optional[str] = None
+    image_url: Optional[str] = None
+    rating: Optional[float] = None
+    delivery_time: Optional[str] = None
+    available: bool = True
+
+
+class SmartSearchRequest(BaseModel):
+    """Request body for smart search"""
+    query: str
+    products: List[ProductInput]
+    pincode: Optional[str] = "560001"
+    strict_mode: bool = True
+
+
+class MatchProductsRequest(BaseModel):
+    """Request body for product matching"""
+    products: List[ProductInput]
+
+
+app = FastAPI(
+    title="PriceHunt API",
+    version="2.0.0",
+    description="AI-powered price comparison API with smart search and product matching"
+)
+
+# Allow CORS for Android app
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize scrapers
+scrapers = {}
+
+def get_scrapers(pincode: str):
+    """Get or create scrapers for the given pincode."""
+    if pincode not in scrapers:
+        scrapers[pincode] = {
+            "Amazon Fresh": AmazonFreshScraper(pincode),
+            "Flipkart Minutes": FlipkartMinutesScraper(pincode),
+            "JioMart Quick": JioMartQuickScraper(pincode),
+            "BigBasket": BigBasketScraper(pincode),
+            "Zepto": ZeptoScraper(pincode),
+            "Amazon": AmazonScraper(pincode),
+            "Flipkart": FlipkartScraper(pincode),
+            "JioMart": JioMartScraper(pincode),
+            "Blinkit": BlinkitScraper(pincode),
+            "Instamart": InstamartScraper(pincode),
+        }
+    return scrapers[pincode]
+
+
+@app.get("/api/search")
+async def search_products(
+    q: str = Query(..., description="Search query"),
+    pincode: str = Query("560001", description="Delivery pincode")
+) -> Dict:
+    """
+    Search for products across all platforms.
+    Returns results as they become available.
+    """
+    platform_scrapers = get_scrapers(pincode)
+    results = {}
+    
+    # Run all scrapers in parallel
+    tasks = []
+    for platform_name, scraper in platform_scrapers.items():
+        tasks.append(search_platform(platform_name, scraper, q))
+    
+    # Wait for all to complete
+    platform_results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Combine results into a flat list
+    all_products = []
+    for platform_name, products in zip(platform_scrapers.keys(), platform_results):
+        if not isinstance(products, Exception) and products:
+            for p in products:
+                all_products.append({
+                    "name": p.name,
+                    "price": p.price,
+                    "original_price": p.original_price,
+                    "discount": p.discount,
+                    "platform": p.platform,
+                    "url": p.url,
+                    "image_url": p.image_url,
+                    "rating": p.rating,
+                    "delivery_time": p.delivery_time,
+                    "available": p.available
+                })
+    
+    # Find lowest price
+    lowest = None
+    if all_products:
+        lowest = min(all_products, key=lambda x: x["price"])
+    
+    return {
+        "query": q,
+        "pincode": pincode,
+        "results": all_products,
+        "lowest_price": lowest,
+        "total_platforms": len([p for p in platform_results if not isinstance(p, Exception) and p])
+    }
+
+
+async def search_platform(platform_name: str, scraper, query: str):
+    """Search a single platform."""
+    try:
+        print(f"{platform_name}: Searching for '{query}'...")
+        products = await scraper.search(query)
+        print(f"{platform_name}: Found {len(products)} products")
+        return products
+    except Exception as e:
+        print(f"{platform_name}: Error - {e}")
+        return []
+
+
+@app.get("/api/platforms")
+async def get_platforms():
+    """Get list of all supported platforms."""
+    return {
+        "platforms": [
+            {"name": "Amazon Fresh", "delivery_time": "2-4 hours"},
+            {"name": "Flipkart Minutes", "delivery_time": "10-45 mins"},
+            {"name": "JioMart Quick", "delivery_time": "10-30 mins"},
+            {"name": "BigBasket", "delivery_time": "2-4 hours"},
+            {"name": "Zepto", "delivery_time": "10-15 mins"},
+            {"name": "Amazon", "delivery_time": "1-3 days"},
+            {"name": "Flipkart", "delivery_time": "2-4 days"},
+            {"name": "JioMart", "delivery_time": "2-5 days"},
+            {"name": "Blinkit", "delivery_time": "10-20 mins"},
+            {"name": "Instamart", "delivery_time": "15-30 mins"},
+        ]
+    }
+
+
+@app.get("/")
+async def root():
+    """API root endpoint."""
+    gemini = get_gemini_service()
+    return {
+        "message": "PriceHunt API - AI-Powered Price Comparison",
+        "version": "2.0.0",
+        "ai_enabled": gemini.is_available(),
+        "endpoints": {
+            "/api/search": "Search products across platforms (server-side scraping)",
+            "/api/smart-search": "🆕 AI-powered smart search (for Android scraped data)",
+            "/api/match-products": "🆕 Match similar products across platforms",
+            "/api/understand-query": "🆕 Understand search query intent",
+            "/api/platforms": "Get supported platforms",
+            "/docs": "API documentation"
+        }
+    }
+
+
+# ============================================================================
+# NEW AI-POWERED ENDPOINTS
+# ============================================================================
+
+@app.post("/api/smart-search")
+async def smart_search(request: SmartSearchRequest):
+    """
+    🆕 AI-powered smart search filtering.
+    
+    Takes scraped products from Android app and filters them using Gemini AI
+    to return only relevant results.
+    
+    Example:
+    - Query: "milk"
+    - Input: [Amul Milk, Milkmaid, Dairy Milk Chocolate, Mother Dairy Milk]
+    - Output: [Amul Milk, Mother Dairy Milk] (filtered out non-milk products)
+    """
+    smart_search_service = get_smart_search()
+    
+    # Convert Pydantic models to dicts
+    products = [p.model_dump() for p in request.products]
+    
+    result = await smart_search_service.search(
+        query=request.query,
+        products=products,
+        strict_mode=request.strict_mode
+    )
+    
+    return {
+        "query": request.query,
+        "pincode": request.pincode,
+        "ai_powered": result.ai_powered,
+        "query_understanding": result.query_understanding,
+        "results": result.products,
+        "filtered_out": result.filtered_out,
+        "best_deal": result.best_deal,
+        "stats": {
+            "total_input": len(products),
+            "total_relevant": result.total_found,
+            "total_filtered": result.total_filtered
+        }
+    }
+
+
+@app.post("/api/match-products")
+async def match_products(request: MatchProductsRequest):
+    """
+    🆕 Match similar products across platforms.
+    
+    Groups products that are the same item (same brand, size) from different
+    platforms to show price comparison.
+    
+    Example:
+    - Input: [Amul Milk 500ml @Zepto ₹28, Amul Taaza 500ml @BigBasket ₹30]
+    - Output: Grouped as same product, best deal: Zepto ₹28
+    """
+    matcher = get_product_matcher()
+    
+    # Convert Pydantic models to dicts
+    products = [p.model_dump() for p in request.products]
+    
+    result = await matcher.match_products(products)
+    
+    # Convert ProductGroup objects to dicts
+    groups = []
+    for group in result.product_groups:
+        groups.append({
+            "canonical_name": group.canonical_name,
+            "brand": group.brand,
+            "quantity": group.quantity,
+            "products": group.products,
+            "best_deal": group.best_deal,
+            "price_range": group.price_range,
+            "savings": group.savings
+        })
+    
+    return {
+        "ai_powered": result.ai_powered,
+        "product_groups": groups,
+        "unmatched_products": result.unmatched_products,
+        "stats": {
+            "total_products": result.total_products,
+            "total_groups": result.total_groups,
+            "total_matched": result.total_matched,
+            "total_unmatched": len(result.unmatched_products)
+        }
+    }
+
+
+@app.get("/api/understand-query")
+async def understand_query(q: str = Query(..., description="Search query to analyze")):
+    """
+    🆕 Understand search query intent using Gemini AI.
+    
+    Analyzes natural language query to extract:
+    - Product type
+    - Quantity
+    - Brand
+    - Category
+    - Terms to include/exclude
+    """
+    gemini = get_gemini_service()
+    
+    result = await gemini.understand_query(q)
+    
+    return {
+        "query": q,
+        "ai_powered": result.get("ai_powered", False),
+        "understanding": result
+    }
+
+
+@app.post("/api/smart-search-and-match")
+async def smart_search_and_match(request: SmartSearchRequest):
+    """
+    🆕 Combined smart search + product matching in one call.
+    
+    1. Filters products using AI to remove irrelevant items
+    2. Groups remaining products by similarity
+    3. Returns best deals per product group
+    
+    This is the recommended endpoint for Android app integration.
+    """
+    smart_search_service = get_smart_search()
+    matcher = get_product_matcher()
+    
+    # Convert Pydantic models to dicts
+    products = [p.model_dump() for p in request.products]
+    
+    # Step 1: Smart search filtering
+    search_result = await smart_search_service.search(
+        query=request.query,
+        products=products,
+        strict_mode=request.strict_mode
+    )
+    
+    # Step 2: Match products across platforms
+    match_result = await matcher.match_products(search_result.products)
+    
+    # Convert ProductGroup objects to dicts
+    groups = []
+    for group in match_result.product_groups:
+        groups.append({
+            "canonical_name": group.canonical_name,
+            "brand": group.brand,
+            "quantity": group.quantity,
+            "products": group.products,
+            "best_deal": group.best_deal,
+            "price_range": group.price_range,
+            "savings": group.savings
+        })
+    
+    return {
+        "query": request.query,
+        "pincode": request.pincode,
+        "ai_powered": search_result.ai_powered or match_result.ai_powered,
+        "query_understanding": search_result.query_understanding,
+        
+        # Matched product groups (for comparison view)
+        "product_groups": groups,
+        
+        # All relevant products (flat list)
+        "all_products": search_result.products,
+        
+        # Best overall deal
+        "best_deal": search_result.best_deal,
+        
+        # Filtered out products (for debugging/transparency)
+        "filtered_out": search_result.filtered_out,
+        
+        # Stats
+        "stats": {
+            "input_products": len(products),
+            "relevant_products": search_result.total_found,
+            "filtered_products": search_result.total_filtered,
+            "product_groups": match_result.total_groups,
+            "matched_products": match_result.total_matched
+        }
+    }
+
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint for deployment monitoring."""
+    gemini = get_gemini_service()
+    return {
+        "status": "healthy",
+        "version": "2.0.0",
+        "ai_available": gemini.is_available()
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    print("🚀 Starting PriceHunt API server v2.0...")
+    print("🤖 AI-powered smart search enabled!")
+    print("📱 Android app should connect to: http://YOUR_MAC_IP:8000")
+    print("📚 API docs available at: http://localhost:8000/docs")
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+
