@@ -1,0 +1,6 @@
+# PriceHunt API Lite - AI filtering only (no scraping)
+fastapi==0.109.0
+uvicorn==0.27.0
+pydantic==2.5.3
+# AI-powered smart search
+google-generativeai==0.8.0
