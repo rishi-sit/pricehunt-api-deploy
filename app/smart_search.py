@@ -121,7 +121,7 @@ class SmartSearch:
             )
         
         # Apply rule-based filtering
-        if ai_result and ai_result.get("ai_powered"):
+        if isinstance(ai_result, dict) and ai_result.get("ai_powered"):
             relevant = ai_result.get("relevant_products", [])
             filtered = ai_result.get("filtered_out", [])
             query_understanding = ai_result.get("query_understanding", {})
@@ -162,7 +162,7 @@ class SmartSearch:
             filtered_out=filtered,
             query_understanding=query_understanding,
             best_deal=best_deal,
-            ai_powered=ai_result.get("ai_powered", False) if ai_result else False,
+            ai_powered=ai_result.get("ai_powered", False) if isinstance(ai_result, dict) else False,
             total_found=len(relevant),
             total_filtered=len(filtered)
         )

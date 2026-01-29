@@ -47,9 +47,10 @@ class ProductInput(BaseModel):
 class SmartSearchRequest(BaseModel):
     """Request body for smart search"""
     query: str
-    products: List[ProductInput]
+    products: List[ProductInput] = []
     pincode: Optional[str] = "560001"
     strict_mode: bool = True
+    platform_results: Optional[Dict[str, List[ProductInput]]] = None
 
 
 class MatchProductsRequest(BaseModel):
@@ -214,8 +215,16 @@ async def smart_search(request: SmartSearchRequest):
     """
     smart_search_service = get_smart_search()
     
-    # Convert Pydantic models to dicts
-    products = [p.model_dump() for p in request.products]
+    # Convert Pydantic models to dicts (prefer platform-wise input if provided)
+    platform_results = request.platform_results or {}
+    if platform_results:
+        products = [
+            p.model_dump()
+            for platform_products in platform_results.values()
+            for p in platform_products
+        ]
+    else:
+        products = [p.model_dump() for p in request.products]
     
     result = await smart_search_service.search(
         query=request.query,
@@ -223,6 +232,10 @@ async def smart_search(request: SmartSearchRequest):
         strict_mode=request.strict_mode
     )
     
+    platform_counts = {
+        platform: len(items) for platform, items in platform_results.items()
+    } if platform_results else {}
+
     return {
         "query": request.query,
         "pincode": request.pincode,
@@ -234,7 +247,8 @@ async def smart_search(request: SmartSearchRequest):
         "stats": {
             "total_input": len(products),
             "total_relevant": result.total_found,
-            "total_filtered": result.total_filtered
+            "total_filtered": result.total_filtered,
+            "platform_counts": platform_counts
         }
     }
 
@@ -253,8 +267,16 @@ async def match_products(request: MatchProductsRequest):
     """
     matcher = get_product_matcher()
     
-    # Convert Pydantic models to dicts
-    products = [p.model_dump() for p in request.products]
+    # Convert Pydantic models to dicts (prefer platform-wise input if provided)
+    platform_results = request.platform_results or {}
+    if platform_results:
+        products = [
+            p.model_dump()
+            for platform_products in platform_results.values()
+            for p in platform_products
+        ]
+    else:
+        products = [p.model_dump() for p in request.products]
     
     result = await matcher.match_products(products)
     
@@ -347,6 +369,10 @@ async def smart_search_and_match(request: SmartSearchRequest):
             "savings": group.savings
         })
     
+    platform_counts = {
+        platform: len(items) for platform, items in platform_results.items()
+    } if platform_results else {}
+
     return {
         "query": request.query,
         "pincode": request.pincode,
@@ -371,7 +397,8 @@ async def smart_search_and_match(request: SmartSearchRequest):
             "relevant_products": search_result.total_found,
             "filtered_products": search_result.total_filtered,
             "product_groups": match_result.total_groups,
-            "matched_products": match_result.total_matched
+            "matched_products": match_result.total_matched,
+            "platform_counts": platform_counts
         }
     }
 
