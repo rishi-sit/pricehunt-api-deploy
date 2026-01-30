@@ -34,6 +34,7 @@ class MatchingResult:
     product_groups: List[ProductGroup]
     unmatched_products: List[Dict[str, Any]]
     ai_powered: bool
+    ai_meta: Optional[Dict[str, Any]] = None
     total_products: int
     total_groups: int
     total_matched: int
@@ -114,6 +115,7 @@ class ProductMatcher:
                 product_groups=[],
                 unmatched_products=[],
                 ai_powered=False,
+                ai_meta=None,
                 total_products=0,
                 total_groups=0,
                 total_matched=0
@@ -127,6 +129,7 @@ class ProductMatcher:
         ai_result = self._normalize_ai_result(ai_result)
         
         # Use AI results or fall back to rule-based
+        ai_meta = ai_result.get("ai_meta")
         if ai_result.get("ai_powered"):
             groups = self._process_ai_groups(ai_result.get("product_groups", []))
             unmatched = ai_result.get("unmatched_products", [])
@@ -152,6 +155,7 @@ class ProductMatcher:
             product_groups=product_groups,
             unmatched_products=unmatched,
             ai_powered=ai_result.get("ai_powered", False),
+            ai_meta=ai_meta,
             total_products=len(products),
             total_groups=len(product_groups),
             total_matched=total_matched
@@ -163,6 +167,7 @@ class ProductMatcher:
         if isinstance(ai_result, MatchingResult):
             return {
                 "ai_powered": ai_result.ai_powered,
+                "ai_meta": ai_result.ai_meta,
                 "product_groups": [asdict(group) for group in ai_result.product_groups],
                 "unmatched_products": ai_result.unmatched_products
             }

@@ -22,6 +22,7 @@ class SearchResult:
     query_understanding: Dict[str, Any]
     best_deal: Optional[Dict[str, Any]]
     ai_powered: bool
+    ai_meta: Optional[Dict[str, Any]] = None
     total_found: int
     total_filtered: int
 
@@ -99,6 +100,7 @@ class SmartSearch:
                 query_understanding={"original": query, "interpreted_as": query},
                 best_deal=None,
                 ai_powered=False,
+                ai_meta=None,
                 total_found=0,
                 total_filtered=0
             )
@@ -123,6 +125,7 @@ class SmartSearch:
         ai_result = self._normalize_ai_result(ai_result)
         
         # Apply rule-based filtering
+        ai_meta = ai_result.get("ai_meta")
         if ai_result.get("ai_powered"):
             relevant = ai_result.get("relevant_products", [])
             filtered = ai_result.get("filtered_out", [])
@@ -165,6 +168,7 @@ class SmartSearch:
             query_understanding=query_understanding,
             best_deal=best_deal,
             ai_powered=ai_result.get("ai_powered", False),
+            ai_meta=ai_meta,
             total_found=len(relevant),
             total_filtered=len(filtered)
         )
@@ -175,6 +179,7 @@ class SmartSearch:
         if isinstance(ai_result, SearchResult):
             return {
                 "ai_powered": ai_result.ai_powered,
+                "ai_meta": ai_result.ai_meta,
                 "relevant_products": ai_result.products,
                 "filtered_out": ai_result.filtered_out,
                 "query_understanding": ai_result.query_understanding

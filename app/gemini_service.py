@@ -8,6 +8,7 @@ Handles all interactions with Google's Gemini API for:
 import os
 import json
 import asyncio
+import time
 from typing import List, Dict, Optional, Any
 import google.generativeai as genai
 from pydantic import BaseModel
@@ -60,6 +61,8 @@ class GeminiService:
     """
     
     def __init__(self, api_key: Optional[str] = None):
+        self.model_name = "gemini-2.5-flash"
+        self.request_timeout_s = float(os.getenv("GEMINI_TIMEOUT_SEC", "6"))
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             print("⚠️ GEMINI_API_KEY not set - AI features will be disabled")
@@ -70,7 +73,7 @@ class GeminiService:
         
         # Use Gemini 2.5 Flash for speed and cost efficiency
         self.model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
+            model_name=self.model_name,
             generation_config={
                 "temperature": 0.1,  # Low temperature for consistent results
                 "top_p": 0.95,
@@ -78,11 +81,24 @@ class GeminiService:
                 "response_mime_type": "application/json"  # Force JSON output
             }
         )
-        print("✅ Gemini AI initialized (model: gemini-2.5-flash)")
+        print(
+            f"✅ Gemini AI initialized (model: {self.model_name}, "
+            f"timeout: {self.request_timeout_s}s)"
+        )
     
     def is_available(self) -> bool:
         """Check if Gemini is properly configured"""
         return self.model is not None
+
+    def _extract_usage_metadata(self, response: Any) -> Dict[str, Optional[int]]:
+        usage = getattr(response, "usage_metadata", None)
+        if not usage:
+            return {}
+        return {
+            "prompt_token_count": getattr(usage, "prompt_token_count", None),
+            "candidates_token_count": getattr(usage, "candidates_token_count", None),
+            "total_token_count": getattr(usage, "total_token_count", None)
+        }
     
     async def filter_relevant_products(
         self, 
@@ -111,7 +127,11 @@ class GeminiService:
                 "relevant_products": products,
                 "filtered_out": [],
                 "query_understanding": {"original": query, "interpreted_as": query},
-                "ai_powered": False
+                "ai_powered": False,
+                "ai_meta": {
+                    "ai_available": False,
+                    "model": self.model_name
+                }
             }
         
         # Limit products to avoid token limits (prioritize by price)
@@ -121,13 +141,21 @@ class GeminiService:
         # Build the prompt
         prompt = self._build_filter_prompt(query, products_subset, strict_mode)
         
+        start_time = time.monotonic()
         try:
-            response = await asyncio.to_thread(
-                self.model.generate_content, prompt
+            response = await asyncio.wait_for(
+                asyncio.to_thread(self.model.generate_content, prompt),
+                timeout=self.request_timeout_s
             )
-            
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+
             result = json.loads(response.text)
             result["ai_powered"] = True
+            result["ai_meta"] = {
+                "model": self.model_name,
+                "latency_ms": elapsed_ms,
+                "token_usage": self._extract_usage_metadata(response)
+            }
             
             # Map back to full product data
             result["relevant_products"] = self._enrich_products(
@@ -137,7 +165,24 @@ class GeminiService:
             
             return result
             
+        except asyncio.TimeoutError:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            print("❌ Gemini filter error: AI timeout")
+            # Fallback on error
+            return {
+                "relevant_products": products,
+                "filtered_out": [],
+                "query_understanding": {"original": query, "interpreted_as": query},
+                "ai_powered": False,
+                "error": "AI timeout",
+                "ai_meta": {
+                    "model": self.model_name,
+                    "latency_ms": elapsed_ms,
+                    "timeout": True
+                }
+            }
         except Exception as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
             print(f"❌ Gemini filter error: {e}")
             # Fallback on error
             return {
@@ -145,7 +190,12 @@ class GeminiService:
                 "filtered_out": [],
                 "query_understanding": {"original": query, "interpreted_as": query},
                 "ai_powered": False,
-                "error": str(e)
+                "error": str(e),
+                "ai_meta": {
+                    "model": self.model_name,
+                    "latency_ms": elapsed_ms,
+                    "timeout": False
+                }
             }
     
     async def match_products_across_platforms(
@@ -175,7 +225,11 @@ class GeminiService:
             return {
                 "product_groups": [],
                 "unmatched_products": products,
-                "ai_powered": False
+                "ai_powered": False,
+                "ai_meta": {
+                    "ai_available": False,
+                    "model": self.model_name
+                }
             }
         
         # Limit products
@@ -183,13 +237,21 @@ class GeminiService:
         
         prompt = self._build_matching_prompt(products_subset)
         
+        start_time = time.monotonic()
         try:
-            response = await asyncio.to_thread(
-                self.model.generate_content, prompt
+            response = await asyncio.wait_for(
+                asyncio.to_thread(self.model.generate_content, prompt),
+                timeout=self.request_timeout_s
             )
-            
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+
             result = json.loads(response.text)
             result["ai_powered"] = True
+            result["ai_meta"] = {
+                "model": self.model_name,
+                "latency_ms": elapsed_ms,
+                "token_usage": self._extract_usage_metadata(response)
+            }
             
             # Enrich groups with full product data
             for group in result.get("product_groups", []):
@@ -208,13 +270,33 @@ class GeminiService:
             
             return result
             
+        except asyncio.TimeoutError:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            print("❌ Gemini matching error: AI timeout")
+            return {
+                "product_groups": [],
+                "unmatched_products": products,
+                "ai_powered": False,
+                "error": "AI timeout",
+                "ai_meta": {
+                    "model": self.model_name,
+                    "latency_ms": elapsed_ms,
+                    "timeout": True
+                }
+            }
         except Exception as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
             print(f"❌ Gemini matching error: {e}")
             return {
                 "product_groups": [],
                 "unmatched_products": products,
                 "ai_powered": False,
-                "error": str(e)
+                "error": str(e),
+                "ai_meta": {
+                    "model": self.model_name,
+                    "latency_ms": elapsed_ms,
+                    "timeout": False
+                }
             }
     
     async def understand_query(self, query: str) -> Dict[str, Any]:
@@ -236,7 +318,11 @@ class GeminiService:
             return {
                 "original_query": query,
                 "product_type": query,
-                "ai_powered": False
+                "ai_powered": False,
+                "ai_meta": {
+                    "ai_available": False,
+                    "model": self.model_name
+                }
             }
         
         prompt = f"""Analyze this grocery search query and extract structured information.
@@ -260,22 +346,50 @@ Be smart about exclude_terms:
 
 JSON only, no explanation:"""
         
+        start_time = time.monotonic()
         try:
-            response = await asyncio.to_thread(
-                self.model.generate_content, prompt
+            response = await asyncio.wait_for(
+                asyncio.to_thread(self.model.generate_content, prompt),
+                timeout=self.request_timeout_s
             )
-            
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+
             result = json.loads(response.text)
             result["ai_powered"] = True
+            result["ai_meta"] = {
+                "model": self.model_name,
+                "latency_ms": elapsed_ms,
+                "token_usage": self._extract_usage_metadata(response)
+            }
             return result
-            
+
+        except asyncio.TimeoutError:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            print("❌ Gemini query understanding error: AI timeout")
+            return {
+                "original_query": query,
+                "product_type": query,
+                "ai_powered": False,
+                "error": "AI timeout",
+                "ai_meta": {
+                    "model": self.model_name,
+                    "latency_ms": elapsed_ms,
+                    "timeout": True
+                }
+            }
         except Exception as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
             print(f"❌ Gemini query understanding error: {e}")
             return {
                 "original_query": query,
                 "product_type": query,
                 "ai_powered": False,
-                "error": str(e)
+                "error": str(e),
+                "ai_meta": {
+                    "model": self.model_name,
+                    "latency_ms": elapsed_ms,
+                    "timeout": False
+                }
             }
     
     def _build_filter_prompt(

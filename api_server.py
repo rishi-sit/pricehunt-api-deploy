@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel
 import asyncio
+import time
 from app.scrapers.amazon import AmazonScraper
 from app.scrapers.amazon_fresh import AmazonFreshScraper
 from app.scrapers.flipkart import FlipkartScraper
@@ -214,6 +215,7 @@ async def smart_search(request: SmartSearchRequest):
     - Output: [Amul Milk, Mother Dairy Milk] (filtered out non-milk products)
     """
     smart_search_service = get_smart_search()
+    start_time = time.monotonic()
     
     # Convert Pydantic models to dicts (prefer platform-wise input if provided)
     platform_results = request.platform_results or {}
@@ -226,11 +228,14 @@ async def smart_search(request: SmartSearchRequest):
     else:
         products = [p.model_dump() for p in request.products]
     
+    filter_start = time.monotonic()
     result = await smart_search_service.search(
         query=request.query,
         products=products,
         strict_mode=request.strict_mode
     )
+    filter_ms = int((time.monotonic() - filter_start) * 1000)
+    total_ms = int((time.monotonic() - start_time) * 1000)
     
     platform_counts = {
         platform: len(items) for platform, items in platform_results.items()
@@ -240,10 +245,15 @@ async def smart_search(request: SmartSearchRequest):
         "query": request.query,
         "pincode": request.pincode,
         "ai_powered": result.ai_powered,
+        "ai_meta": result.ai_meta,
         "query_understanding": result.query_understanding,
         "results": result.products,
         "filtered_out": result.filtered_out,
         "best_deal": result.best_deal,
+        "timing_ms": {
+            "total": total_ms,
+            "filter": filter_ms
+        },
         "stats": {
             "total_input": len(products),
             "total_relevant": result.total_found,
@@ -266,6 +276,7 @@ async def match_products(request: MatchProductsRequest):
     - Output: Grouped as same product, best deal: Zepto ₹28
     """
     matcher = get_product_matcher()
+    start_time = time.monotonic()
     
     # Convert Pydantic models to dicts (prefer platform-wise input if provided)
     platform_results = request.platform_results or {}
@@ -279,6 +290,7 @@ async def match_products(request: MatchProductsRequest):
         products = [p.model_dump() for p in request.products]
     
     result = await matcher.match_products(products)
+    match_ms = int((time.monotonic() - start_time) * 1000)
     
     # Convert ProductGroup objects to dicts
     groups = []
@@ -295,8 +307,13 @@ async def match_products(request: MatchProductsRequest):
     
     return {
         "ai_powered": result.ai_powered,
+        "ai_meta": result.ai_meta,
         "product_groups": groups,
         "unmatched_products": result.unmatched_products,
+        "timing_ms": {
+            "total": match_ms,
+            "match": match_ms
+        },
         "stats": {
             "total_products": result.total_products,
             "total_groups": result.total_groups,
@@ -342,19 +359,33 @@ async def smart_search_and_match(request: SmartSearchRequest):
     """
     smart_search_service = get_smart_search()
     matcher = get_product_matcher()
+    start_time = time.monotonic()
     
-    # Convert Pydantic models to dicts
-    products = [p.model_dump() for p in request.products]
+    # Convert Pydantic models to dicts (prefer platform-wise input if provided)
+    platform_results = request.platform_results or {}
+    if platform_results:
+        products = [
+            p.model_dump()
+            for platform_products in platform_results.values()
+            for p in platform_products
+        ]
+    else:
+        products = [p.model_dump() for p in request.products]
     
     # Step 1: Smart search filtering
+    filter_start = time.monotonic()
     search_result = await smart_search_service.search(
         query=request.query,
         products=products,
         strict_mode=request.strict_mode
     )
+    filter_ms = int((time.monotonic() - filter_start) * 1000)
     
     # Step 2: Match products across platforms
+    match_start = time.monotonic()
     match_result = await matcher.match_products(search_result.products)
+    match_ms = int((time.monotonic() - match_start) * 1000)
+    total_ms = int((time.monotonic() - start_time) * 1000)
     
     # Convert ProductGroup objects to dicts
     groups = []
@@ -377,6 +408,10 @@ async def smart_search_and_match(request: SmartSearchRequest):
         "query": request.query,
         "pincode": request.pincode,
         "ai_powered": search_result.ai_powered or match_result.ai_powered,
+        "ai_meta": {
+            "filter": search_result.ai_meta,
+            "match": match_result.ai_meta
+        },
         "query_understanding": search_result.query_understanding,
         
         # Matched product groups (for comparison view)
@@ -399,6 +434,11 @@ async def smart_search_and_match(request: SmartSearchRequest):
             "product_groups": match_result.total_groups,
             "matched_products": match_result.total_matched,
             "platform_counts": platform_counts
+        },
+        "timing_ms": {
+            "total": total_ms,
+            "filter": filter_ms,
+            "match": match_ms
         }
     }
 
