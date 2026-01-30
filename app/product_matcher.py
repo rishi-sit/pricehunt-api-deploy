@@ -34,10 +34,10 @@ class MatchingResult:
     product_groups: List[ProductGroup]
     unmatched_products: List[Dict[str, Any]]
     ai_powered: bool
-    ai_meta: Optional[Dict[str, Any]] = None
     total_products: int
     total_groups: int
     total_matched: int
+    ai_meta: Optional[Dict[str, Any]] = None
 
 
 class ProductMatcher:

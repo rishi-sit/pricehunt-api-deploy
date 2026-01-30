@@ -22,9 +22,9 @@ class SearchResult:
     query_understanding: Dict[str, Any]
     best_deal: Optional[Dict[str, Any]]
     ai_powered: bool
-    ai_meta: Optional[Dict[str, Any]] = None
     total_found: int
     total_filtered: int
+    ai_meta: Optional[Dict[str, Any]] = None
 
 
 class SmartSearch:
