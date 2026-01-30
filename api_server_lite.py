@@ -20,6 +20,8 @@ from app.product_matcher import get_product_matcher
 from app.gemini_service import get_gemini_service
 from app.ai_scraper import get_ai_scraper
 
+MAX_PLATFORM_ITEMS = 10
+
 app = FastAPI(
     title="PriceHunt API Lite",
     description="AI-powered product filtering and matching API (no scraping)",
@@ -128,9 +130,13 @@ async def smart_search_endpoint(request: SmartSearchRequest):
         start_time = time.monotonic()
         platform_results = request.platform_results or {}
         if platform_results:
+            limited_platform_results = {
+                platform: items[:MAX_PLATFORM_ITEMS]
+                for platform, items in platform_results.items()
+            }
             products_dict = [
                 p.model_dump()
-                for platform_products in platform_results.values()
+                for platform_products in limited_platform_results.values()
                 for p in platform_products
             ]
         else:
@@ -146,7 +152,7 @@ async def smart_search_endpoint(request: SmartSearchRequest):
         total_ms = int((time.monotonic() - start_time) * 1000)
 
         platform_counts = {
-            platform: len(items) for platform, items in platform_results.items()
+            platform: len(items) for platform, items in limited_platform_results.items()
         } if platform_results else {}
 
         return {
@@ -228,9 +234,13 @@ async def smart_search_and_match(request: SmartSearchRequest):
         start_time = time.monotonic()
         platform_results = request.platform_results or {}
         if platform_results:
+            limited_platform_results = {
+                platform: items[:MAX_PLATFORM_ITEMS]
+                for platform, items in platform_results.items()
+            }
             products_dict = [
                 p.model_dump()
-                for platform_products in platform_results.values()
+                for platform_products in limited_platform_results.values()
                 for p in platform_products
             ]
         else:
@@ -266,7 +276,7 @@ async def smart_search_and_match(request: SmartSearchRequest):
             })
 
         platform_counts = {
-            platform: len(items) for platform, items in platform_results.items()
+            platform: len(items) for platform, items in limited_platform_results.items()
         } if platform_results else {}
 
         return {

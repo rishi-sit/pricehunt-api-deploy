@@ -62,7 +62,7 @@ class GeminiService:
     
     def __init__(self, api_key: Optional[str] = None):
         self.model_name = "gemini-2.5-flash"
-        self.request_timeout_s = float(os.getenv("GEMINI_TIMEOUT_SEC", "6"))
+        self.request_timeout_s = float(os.getenv("GEMINI_TIMEOUT_SEC", "10"))
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             print("⚠️ GEMINI_API_KEY not set - AI features will be disabled")
