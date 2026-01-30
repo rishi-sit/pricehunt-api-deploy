@@ -119,9 +119,11 @@ class SmartSearch:
                 products,
                 strict_mode=strict_mode and not is_product_type_search
             )
+
+        ai_result = self._normalize_ai_result(ai_result)
         
         # Apply rule-based filtering
-        if isinstance(ai_result, dict) and ai_result.get("ai_powered"):
+        if ai_result.get("ai_powered"):
             relevant = ai_result.get("relevant_products", [])
             filtered = ai_result.get("filtered_out", [])
             query_understanding = ai_result.get("query_understanding", {})
@@ -162,10 +164,22 @@ class SmartSearch:
             filtered_out=filtered,
             query_understanding=query_understanding,
             best_deal=best_deal,
-            ai_powered=ai_result.get("ai_powered", False) if isinstance(ai_result, dict) else False,
+            ai_powered=ai_result.get("ai_powered", False),
             total_found=len(relevant),
             total_filtered=len(filtered)
         )
+
+    def _normalize_ai_result(self, ai_result: Any) -> Dict[str, Any]:
+        if isinstance(ai_result, dict):
+            return ai_result
+        if isinstance(ai_result, SearchResult):
+            return {
+                "ai_powered": ai_result.ai_powered,
+                "relevant_products": ai_result.products,
+                "filtered_out": ai_result.filtered_out,
+                "query_understanding": ai_result.query_understanding
+            }
+        return {}
     
     def _rule_based_filter(
         self,

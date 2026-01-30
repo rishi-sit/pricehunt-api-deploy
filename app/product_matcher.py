@@ -10,7 +10,7 @@ This module handles:
 """
 import re
 from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from .gemini_service import get_gemini_service
 
 
@@ -123,9 +123,11 @@ class ProductMatcher:
         ai_result = None
         if use_ai and self.gemini.is_available() and len(products) > 3:
             ai_result = await self.gemini.match_products_across_platforms(products)
+
+        ai_result = self._normalize_ai_result(ai_result)
         
         # Use AI results or fall back to rule-based
-        if ai_result and ai_result.get("ai_powered"):
+        if ai_result.get("ai_powered"):
             groups = self._process_ai_groups(ai_result.get("product_groups", []))
             unmatched = ai_result.get("unmatched_products", [])
         else:
@@ -149,11 +151,22 @@ class ProductMatcher:
         return MatchingResult(
             product_groups=product_groups,
             unmatched_products=unmatched,
-            ai_powered=ai_result.get("ai_powered", False) if ai_result else False,
+            ai_powered=ai_result.get("ai_powered", False),
             total_products=len(products),
             total_groups=len(product_groups),
             total_matched=total_matched
         )
+
+    def _normalize_ai_result(self, ai_result: Any) -> Dict[str, Any]:
+        if isinstance(ai_result, dict):
+            return ai_result
+        if isinstance(ai_result, MatchingResult):
+            return {
+                "ai_powered": ai_result.ai_powered,
+                "product_groups": [asdict(group) for group in ai_result.product_groups],
+                "unmatched_products": ai_result.unmatched_products
+            }
+        return {}
     
     def _rule_based_matching(
         self,
