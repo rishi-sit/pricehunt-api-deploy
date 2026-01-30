@@ -36,6 +36,7 @@ class SmartSearch:
     2. Fall back to rule-based filtering if AI fails
     3. Apply post-processing rules for edge cases
     """
+    AI_MIN_PRODUCTS = 2
     
     # Words that indicate a derivative/processed product
     DERIVATIVE_INDICATORS = {
@@ -115,17 +116,30 @@ class SmartSearch:
         
         # Try AI-powered filtering first
         ai_result = None
-        if self.gemini.is_available() and len(products) > 5:
+        ai_skip_reason = None
+        if self.gemini.is_available() and len(products) >= self.AI_MIN_PRODUCTS:
             ai_result = await self.gemini.filter_relevant_products(
-                query, 
+                query,
                 products,
                 strict_mode=strict_mode and not is_product_type_search
             )
+        else:
+            if not self.gemini.is_available():
+                ai_skip_reason = "ai_unavailable"
+            else:
+                ai_skip_reason = "too_few_products"
 
         ai_result = self._normalize_ai_result(ai_result)
         
         # Apply rule-based filtering
         ai_meta = ai_result.get("ai_meta")
+        if not ai_meta and ai_skip_reason:
+            ai_meta = {
+                "skipped_reason": ai_skip_reason,
+                "product_count": len(products),
+                "min_products": self.AI_MIN_PRODUCTS,
+                "model": getattr(self.gemini, "model_name", None)
+            }
         if ai_result.get("ai_powered"):
             relevant = ai_result.get("relevant_products", [])
             filtered = ai_result.get("filtered_out", [])
@@ -259,6 +273,8 @@ class SmartSearch:
         if not is_product_type_search:
             for indicator in self.DERIVATIVE_INDICATORS:
                 if indicator in name_lower:
+                    if self._is_allowed_derivative(primary_keyword, indicator, name_lower):
+                        continue
                     # Check if the derivative IS the search term
                     if indicator == primary_keyword or indicator == query:
                         continue  # User is searching for this derivative
@@ -296,6 +312,20 @@ class SmartSearch:
                 if ptype_pos > keyword_pos:
                     return True
         
+        return False
+
+    def _is_allowed_derivative(
+        self,
+        primary_keyword: str,
+        indicator: str,
+        product_name: str
+    ) -> bool:
+        """
+        Allow certain indicator words to pass for specific queries.
+        Example: "full cream milk" should not be filtered for query "milk".
+        """
+        if primary_keyword == "milk" and indicator == "cream":
+            return "milk" in product_name
         return False
     
     def _calculate_relevance_score(
