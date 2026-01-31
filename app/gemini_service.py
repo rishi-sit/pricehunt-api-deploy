@@ -11,6 +11,7 @@ import asyncio
 import time
 from typing import List, Dict, Optional, Any
 import google.generativeai as genai
+import httpx
 from pydantic import BaseModel
 
 
@@ -67,7 +68,12 @@ class GeminiService:
         self.max_input_products = int(os.getenv("GEMINI_MAX_INPUT_PRODUCTS", "30"))
         self.temperature = float(os.getenv("GEMINI_TEMPERATURE", "0.1"))
         self.top_p = float(os.getenv("GEMINI_TOP_P", "0.95"))
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        self.use_http = os.getenv("GEMINI_USE_HTTP", "1").lower() in {"1", "true", "yes"}
+        self.http_base_url = os.getenv(
+            "GEMINI_HTTP_BASE_URL",
+            "https://generativelanguage.googleapis.com/v1beta"
+        )
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
             print("⚠️ GEMINI_API_KEY not set - AI features will be disabled")
             self.model = None
@@ -85,10 +91,12 @@ class GeminiService:
                 "response_mime_type": "application/json"  # Force JSON output
             }
         )
+        transport = "http" if self.use_http else "sdk"
         print(
             f"✅ Gemini AI initialized (model: {self.model_name}, "
             f"timeout: {self.request_timeout_s}s, "
-            f"max_tokens: {self.max_output_tokens})"
+            f"max_tokens: {self.max_output_tokens}, "
+            f"transport: {transport})"
         )
     
     def is_available(self) -> bool:
@@ -104,6 +112,50 @@ class GeminiService:
             "candidates_token_count": getattr(usage, "candidates_token_count", None),
             "total_token_count": getattr(usage, "total_token_count", None)
         }
+
+    def _extract_http_usage(self, data: Dict[str, Any]) -> Dict[str, Optional[int]]:
+        usage = data.get("usageMetadata", {}) if isinstance(data, dict) else {}
+        return {
+            "prompt_token_count": usage.get("promptTokenCount"),
+            "candidates_token_count": usage.get("candidatesTokenCount"),
+            "total_token_count": usage.get("totalTokenCount")
+        }
+
+    async def _generate_content(self, prompt: str) -> tuple[str, Dict[str, Optional[int]]]:
+        if self.use_http:
+            return await self._generate_content_http(prompt)
+        response = await asyncio.to_thread(self.model.generate_content, prompt)
+        return response.text, self._extract_usage_metadata(response)
+
+    async def _generate_content_http(self, prompt: str) -> tuple[str, Dict[str, Optional[int]]]:
+        url = f"{self.http_base_url}/models/{self.model_name}:generateContent"
+        params = {"key": self.api_key}
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": self.temperature,
+                "topP": self.top_p,
+                "maxOutputTokens": self.max_output_tokens,
+                "responseMimeType": "application/json"
+            }
+        }
+        timeout = httpx.Timeout(
+            timeout=self.request_timeout_s,
+            connect=min(self.request_timeout_s, 10.0)
+        )
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(url, params=params, json=payload)
+            response.raise_for_status()
+            data = response.json()
+
+        candidates = data.get("candidates", [])
+        text = ""
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            if parts:
+                text = parts[0].get("text", "")
+
+        return text, self._extract_http_usage(data)
     
     async def filter_relevant_products(
         self, 
@@ -148,18 +200,19 @@ class GeminiService:
         
         start_time = time.monotonic()
         try:
-            response = await asyncio.wait_for(
-                asyncio.to_thread(self.model.generate_content, prompt),
+            text, usage = await asyncio.wait_for(
+                self._generate_content(prompt),
                 timeout=self.request_timeout_s
             )
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
-            result = json.loads(response.text)
+            result = json.loads(text)
             result["ai_powered"] = True
             result["ai_meta"] = {
                 "model": self.model_name,
                 "latency_ms": elapsed_ms,
-                "token_usage": self._extract_usage_metadata(response)
+                "token_usage": usage,
+                "transport": "http" if self.use_http else "sdk"
             }
             
             # Map back to full product data
@@ -244,18 +297,19 @@ class GeminiService:
         
         start_time = time.monotonic()
         try:
-            response = await asyncio.wait_for(
-                asyncio.to_thread(self.model.generate_content, prompt),
+            text, usage = await asyncio.wait_for(
+                self._generate_content(prompt),
                 timeout=self.request_timeout_s
             )
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
-            result = json.loads(response.text)
+            result = json.loads(text)
             result["ai_powered"] = True
             result["ai_meta"] = {
                 "model": self.model_name,
                 "latency_ms": elapsed_ms,
-                "token_usage": self._extract_usage_metadata(response)
+                "token_usage": usage,
+                "transport": "http" if self.use_http else "sdk"
             }
             
             # Enrich groups with full product data
@@ -353,18 +407,19 @@ JSON only, no explanation:"""
         
         start_time = time.monotonic()
         try:
-            response = await asyncio.wait_for(
-                asyncio.to_thread(self.model.generate_content, prompt),
+            text, usage = await asyncio.wait_for(
+                self._generate_content(prompt),
                 timeout=self.request_timeout_s
             )
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
-            result = json.loads(response.text)
+            result = json.loads(text)
             result["ai_powered"] = True
             result["ai_meta"] = {
                 "model": self.model_name,
                 "latency_ms": elapsed_ms,
-                "token_usage": self._extract_usage_metadata(response)
+                "token_usage": usage,
+                "transport": "http" if self.use_http else "sdk"
             }
             return result
 
