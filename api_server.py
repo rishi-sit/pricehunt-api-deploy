@@ -480,6 +480,12 @@ async def gemini_ping():
     return await gemini.ping()
 
 
+@app.get("/api/gemini-models")
+async def gemini_models():
+    """List available Gemini models for this API key."""
+    return await gemini.list_models()
+
+
 if __name__ == "__main__":
     import uvicorn
     import os

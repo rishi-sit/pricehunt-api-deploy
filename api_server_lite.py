@@ -126,6 +126,12 @@ async def gemini_ping():
     return await gemini.ping()
 
 
+@app.get("/api/gemini-models")
+async def gemini_models():
+    """List available Gemini models for this API key."""
+    return await gemini.list_models()
+
+
 @app.post("/api/smart-search")
 async def smart_search_endpoint(request: SmartSearchRequest):
     """

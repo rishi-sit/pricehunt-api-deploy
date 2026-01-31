@@ -220,6 +220,73 @@ class GeminiService:
                 "transport": "http" if self.use_http else "sdk",
                 "error": str(e)
             }
+
+    async def list_models(self) -> Dict[str, Any]:
+        """List available Gemini models for this API key."""
+        if not self.is_available():
+            return {
+                "ok": False,
+                "error": "ai_unavailable"
+            }
+        if not self.use_http:
+            return {
+                "ok": False,
+                "error": "list_models_http_only"
+            }
+        url = f"{self.http_base_url}/models"
+        params = {"key": self.api_key}
+        timeout = httpx.Timeout(
+            timeout=self.request_timeout_s,
+            connect=min(self.request_timeout_s, 10.0)
+        )
+        start_time = time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            models = data.get("models", [])
+            simplified = [
+                {
+                    "name": m.get("name"),
+                    "displayName": m.get("displayName"),
+                    "supportedGenerationMethods": m.get("supportedGenerationMethods"),
+                    "inputTokenLimit": m.get("inputTokenLimit"),
+                    "outputTokenLimit": m.get("outputTokenLimit")
+                }
+                for m in models
+            ]
+            return {
+                "ok": True,
+                "latency_ms": elapsed_ms,
+                "model_count": len(models),
+                "models": simplified
+            }
+        except asyncio.TimeoutError:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            return {
+                "ok": False,
+                "timeout": True,
+                "latency_ms": elapsed_ms
+            }
+        except httpx.HTTPStatusError as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            return {
+                "ok": False,
+                "timeout": False,
+                "latency_ms": elapsed_ms,
+                "status_code": e.response.status_code,
+                "error": e.response.text[:500]
+            }
+        except Exception as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            return {
+                "ok": False,
+                "timeout": False,
+                "latency_ms": elapsed_ms,
+                "error": str(e)
+            }
     
     async def filter_relevant_products(
         self, 
