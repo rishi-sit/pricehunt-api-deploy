@@ -61,8 +61,11 @@ class GeminiService:
     """
     
     def __init__(self, api_key: Optional[str] = None):
-        self.model_name = "gemini-2.5-flash"
+        self.model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
         self.request_timeout_s = float(os.getenv("GEMINI_TIMEOUT_SEC", "10"))
+        self.max_output_tokens = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "1024"))
+        self.temperature = float(os.getenv("GEMINI_TEMPERATURE", "0.1"))
+        self.top_p = float(os.getenv("GEMINI_TOP_P", "0.95"))
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             print("⚠️ GEMINI_API_KEY not set - AI features will be disabled")
@@ -75,15 +78,16 @@ class GeminiService:
         self.model = genai.GenerativeModel(
             model_name=self.model_name,
             generation_config={
-                "temperature": 0.1,  # Low temperature for consistent results
-                "top_p": 0.95,
-                "max_output_tokens": 4096,
+                "temperature": self.temperature,  # Low temperature for consistency
+                "top_p": self.top_p,
+                "max_output_tokens": self.max_output_tokens,
                 "response_mime_type": "application/json"  # Force JSON output
             }
         )
         print(
             f"✅ Gemini AI initialized (model: {self.model_name}, "
-            f"timeout: {self.request_timeout_s}s)"
+            f"timeout: {self.request_timeout_s}s, "
+            f"max_tokens: {self.max_output_tokens})"
         )
     
     def is_available(self) -> bool:
