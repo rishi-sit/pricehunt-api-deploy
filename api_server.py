@@ -234,11 +234,21 @@ async def smart_search(request: SmartSearchRequest):
     else:
         products = [p.model_dump() for p in request.products]
     
+    non_empty_platforms = (
+        sum(1 for items in limited_platform_results.values() if items)
+        if platform_results
+        else 0
+    )
+    use_ai = not platform_results or non_empty_platforms > 1
+    ai_skip_reason = None if use_ai else "single_platform"
+
     filter_start = time.monotonic()
     result = await smart_search_service.search(
         query=request.query,
         products=products,
-        strict_mode=request.strict_mode
+        strict_mode=request.strict_mode,
+        use_ai=use_ai,
+        ai_skip_reason=ai_skip_reason
     )
     filter_ms = int((time.monotonic() - filter_start) * 1000)
     total_ms = int((time.monotonic() - start_time) * 1000)

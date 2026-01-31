@@ -63,7 +63,8 @@ class GeminiService:
     def __init__(self, api_key: Optional[str] = None):
         self.model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
         self.request_timeout_s = float(os.getenv("GEMINI_TIMEOUT_SEC", "10"))
-        self.max_output_tokens = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "1024"))
+        self.max_output_tokens = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "512"))
+        self.max_input_products = int(os.getenv("GEMINI_MAX_INPUT_PRODUCTS", "30"))
         self.temperature = float(os.getenv("GEMINI_TEMPERATURE", "0.1"))
         self.top_p = float(os.getenv("GEMINI_TOP_P", "0.95"))
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
@@ -140,7 +141,7 @@ class GeminiService:
         
         # Limit products to avoid token limits (prioritize by price)
         sorted_products = sorted(products, key=lambda x: x.get("price", float("inf")))
-        products_subset = sorted_products[:100]  # Max 100 products
+        products_subset = sorted_products[:self.max_input_products]
         
         # Build the prompt
         prompt = self._build_filter_prompt(query, products_subset, strict_mode)
@@ -237,7 +238,7 @@ class GeminiService:
             }
         
         # Limit products
-        products_subset = products[:80]
+        products_subset = products[:self.max_input_products]
         
         prompt = self._build_matching_prompt(products_subset)
         
@@ -407,60 +408,19 @@ JSON only, no explanation:"""
         products_json = json.dumps([
             {"name": p.get("name", ""), "price": p.get("price", 0), "platform": p.get("platform", "")}
             for p in products
-        ], indent=2)
+        ], separators=(",", ":"))
         
-        strictness = """
-STRICT FILTERING RULES:
-- For single word searches like "milk", ONLY include actual milk products
-- "Milkmaid", "Milkshake", "Dairy Milk chocolate" are NOT milk - filter them out
-- "Amul Milk", "Mother Dairy Milk", "Toned Milk" ARE milk - include them
-- If the search term appears as part of a BRAND NAME but the product is different, filter it out
-- Example: Search "grape" should NOT include "Grapefruit" (different fruit)
-""" if strict_mode else """
-LENIENT FILTERING:
-- Include products where the search term is the main ingredient or flavor
-- Only filter obviously unrelated products
-"""
+        strictness = "strict" if strict_mode else "lenient"
         
-        return f"""You are a smart grocery search filter. Given a search query and product list, 
-identify which products are ACTUALLY what the user is looking for.
-
-SEARCH QUERY: "{query}"
-
-{strictness}
-
-PRODUCTS TO FILTER:
-{products_json}
-
-Return a JSON object with:
-{{
-  "query_understanding": {{
-    "original": "{query}",
-    "interpreted_as": "what the user actually wants",
-    "category": "product category"
-  }},
-  "relevant_products": [
-    {{
-      "name": "product name",
-      "price": price,
-      "platform": "platform",
-      "relevance_score": 0-100,
-      "relevance_reason": "why this is relevant"
-    }}
-  ],
-  "filtered_out": [
-    {{
-      "name": "product name", 
-      "platform": "platform",
-      "filter_reason": "why filtered out"
-    }}
-  ]
-}}
-
-Sort relevant_products by relevance_score (highest first), then by price (lowest first).
-Be STRICT - only include products that genuinely match the search intent.
-
-JSON only:"""
+        return (
+            f'Filter grocery products for query "{query}". '
+            f"mode={strictness}. "
+            "Return JSON with keys: "
+            "query_understanding{original,interpreted_as,category}, "
+            "relevant_products[{name,price,platform,relevance_score,relevance_reason}], "
+            "filtered_out[{name,platform,filter_reason}]. "
+            f"Input products: {products_json}"
+        )
     
     def _build_matching_prompt(self, products: List[Dict]) -> str:
         """Build the prompt for product matching"""
@@ -472,44 +432,17 @@ JSON only:"""
                 "platform": p.get("platform", "")
             }
             for p in products
-        ], indent=2)
+        ], separators=(",", ":"))
         
-        return f"""You are a product matching expert. Group these products from different platforms 
-that are THE SAME PRODUCT (same brand, same size, same variant).
-
-PRODUCTS:
-{products_json}
-
-MATCHING RULES:
-1. Only match products that are EXACTLY the same (same brand, size, variant)
-2. "Amul Toned Milk 500ml" from Zepto = "Amul Taaza 500ml" from BigBasket (same product, different naming)
-3. "Amul Toned Milk 500ml" ≠ "Amul Toned Milk 1L" (different sizes)
-4. "Amul Butter 100g" ≠ "Mother Dairy Butter 100g" (different brands)
-5. Normalize names - platforms use different formats
-
-Return JSON:
-{{
-  "product_groups": [
-    {{
-      "canonical_name": "standardized product name with brand and size",
-      "brand": "brand name",
-      "quantity": "quantity/size",
-      "products": [
-        {{"name": "original name", "price": price, "platform": "platform"}}
-      ],
-      "best_deal": {{"platform": "cheapest platform", "price": lowest_price}},
-      "price_range": "₹XX - ₹YY"
-    }}
-  ],
-  "unmatched_products": [
-    {{"name": "name", "price": price, "platform": "platform"}}
-  ]
-}}
-
-Only create groups with 2+ products from DIFFERENT platforms.
-Products with no match go in unmatched_products.
-
-JSON only:"""
+        return (
+            "Group identical products across platforms (same brand, size, variant). "
+            "Return JSON with keys: "
+            "product_groups[{canonical_name,brand,quantity,products[{name,price,platform}],"
+            "best_deal{platform,price},price_range}], "
+            "unmatched_products[{name,price,platform}]. "
+            "Only groups with 2+ products from different platforms. "
+            f"Input products: {products_json}"
+        )
     
     def _enrich_products(
         self, 

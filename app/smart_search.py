@@ -81,7 +81,9 @@ class SmartSearch:
         self,
         query: str,
         products: List[Dict[str, Any]],
-        strict_mode: bool = True
+        strict_mode: bool = True,
+        use_ai: bool = True,
+        ai_skip_reason: Optional[str] = None
     ) -> SearchResult:
         """
         Perform smart search with AI + rule-based filtering.
@@ -116,26 +118,28 @@ class SmartSearch:
         
         # Try AI-powered filtering first
         ai_result = None
-        ai_skip_reason = None
-        if self.gemini.is_available() and len(products) >= self.AI_MIN_PRODUCTS:
+        ai_skip_reason_local = None
+        if use_ai and self.gemini.is_available() and len(products) >= self.AI_MIN_PRODUCTS:
             ai_result = await self.gemini.filter_relevant_products(
                 query,
                 products,
                 strict_mode=strict_mode and not is_product_type_search
             )
         else:
-            if not self.gemini.is_available():
-                ai_skip_reason = "ai_unavailable"
+            if not use_ai:
+                ai_skip_reason_local = ai_skip_reason or "disabled"
+            elif not self.gemini.is_available():
+                ai_skip_reason_local = "ai_unavailable"
             else:
-                ai_skip_reason = "too_few_products"
+                ai_skip_reason_local = "too_few_products"
 
         ai_result = self._normalize_ai_result(ai_result)
         
         # Apply rule-based filtering
         ai_meta = ai_result.get("ai_meta")
-        if not ai_meta and ai_skip_reason:
+        if not ai_meta and ai_skip_reason_local:
             ai_meta = {
-                "skipped_reason": ai_skip_reason,
+                "skipped_reason": ai_skip_reason_local,
                 "product_count": len(products),
                 "min_products": self.AI_MIN_PRODUCTS,
                 "model": getattr(self.gemini, "model_name", None)
