@@ -120,6 +120,12 @@ async def health_check():
     }
 
 
+@app.get("/api/gemini-ping")
+async def gemini_ping():
+    """Quick connectivity test for Gemini API."""
+    return await gemini.ping()
+
+
 @app.post("/api/smart-search")
 async def smart_search_endpoint(request: SmartSearchRequest):
     """

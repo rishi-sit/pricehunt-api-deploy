@@ -156,6 +156,70 @@ class GeminiService:
                 text = parts[0].get("text", "")
 
         return text, self._extract_http_usage(data)
+
+    async def ping(self) -> Dict[str, Any]:
+        """
+        Lightweight Gemini connectivity test.
+        Returns latency, transport, and any error details.
+        """
+        if not self.is_available():
+            return {
+                "ok": False,
+                "error": "ai_unavailable",
+                "model": self.model_name
+            }
+        prompt = 'Return JSON: {"ok": true}'
+        start_time = time.monotonic()
+        try:
+            text, usage = await asyncio.wait_for(
+                self._generate_content(prompt),
+                timeout=self.request_timeout_s
+            )
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            parsed = None
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            return {
+                "ok": True,
+                "latency_ms": elapsed_ms,
+                "model": self.model_name,
+                "transport": "http" if self.use_http else "sdk",
+                "token_usage": usage,
+                "parsed_ok": parsed,
+                "response_preview": text[:200]
+            }
+        except asyncio.TimeoutError:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            return {
+                "ok": False,
+                "timeout": True,
+                "latency_ms": elapsed_ms,
+                "model": self.model_name,
+                "transport": "http" if self.use_http else "sdk"
+            }
+        except httpx.HTTPStatusError as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            return {
+                "ok": False,
+                "timeout": False,
+                "latency_ms": elapsed_ms,
+                "model": self.model_name,
+                "transport": "http",
+                "status_code": e.response.status_code,
+                "error": e.response.text[:200]
+            }
+        except Exception as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            return {
+                "ok": False,
+                "timeout": False,
+                "latency_ms": elapsed_ms,
+                "model": self.model_name,
+                "transport": "http" if self.use_http else "sdk",
+                "error": str(e)
+            }
     
     async def filter_relevant_products(
         self, 

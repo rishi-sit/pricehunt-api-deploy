@@ -474,6 +474,12 @@ async def health_check():
     }
 
 
+@app.get("/api/gemini-ping")
+async def gemini_ping():
+    """Quick connectivity test for Gemini API."""
+    return await gemini.ping()
+
+
 if __name__ == "__main__":
     import uvicorn
     import os
