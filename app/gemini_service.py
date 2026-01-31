@@ -62,7 +62,7 @@ class GeminiService:
     
     def __init__(self, api_key: Optional[str] = None):
         self.model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-        self.request_timeout_s = float(os.getenv("GEMINI_TIMEOUT_SEC", "10"))
+        self.request_timeout_s = float(os.getenv("GEMINI_TIMEOUT_SEC", "60"))
         self.max_output_tokens = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "512"))
         self.max_input_products = int(os.getenv("GEMINI_MAX_INPUT_PRODUCTS", "30"))
         self.temperature = float(os.getenv("GEMINI_TEMPERATURE", "0.1"))
