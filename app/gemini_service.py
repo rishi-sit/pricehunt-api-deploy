@@ -141,6 +141,65 @@ class GeminiService:
             cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
             return json.loads(cleaned)
 
+    def _normalize_text(self, text: str) -> str:
+        return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", str(text).lower())).strip()
+
+    def _match_ai_item(self, orig: Dict[str, Any], ai_items: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        orig_name = self._normalize_text(orig.get("name", ""))
+        if not orig_name:
+            return None
+        orig_platform = self._normalize_text(orig.get("platform", ""))
+        best_item = None
+        best_score = 0.0
+        for item in ai_items:
+            item_name = self._normalize_text(item.get("name", ""))
+            if not item_name:
+                continue
+            item_platform = self._normalize_text(item.get("platform", ""))
+            if item_platform and orig_platform and item_platform not in orig_platform and orig_platform not in item_platform:
+                continue
+            if item_name in orig_name or orig_name in item_name:
+                score = 1.0
+            else:
+                score = self._name_similarity(item_name, orig_name)
+            if score > best_score:
+                best_score = score
+                best_item = item
+        return best_item if best_score >= 0.6 else None
+
+    def _apply_ai_filter(
+        self,
+        ai_relevant: List[Any],
+        ai_filtered: List[Any],
+        original_products: List[Dict[str, Any]]
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        ai_items: List[Dict[str, Any]] = []
+        for item in ai_relevant:
+            if isinstance(item, dict):
+                ai_items.append(item)
+            else:
+                ai_items.append({"name": str(item)})
+
+        relevant: List[Dict[str, Any]] = []
+        filtered: List[Dict[str, Any]] = []
+        for orig in original_products:
+            match = self._match_ai_item(orig, ai_items)
+            if match:
+                enriched = {**orig}
+                enriched["relevance_score"] = match.get("relevance_score", 50)
+                enriched["relevance_reason"] = match.get("relevance_reason", "")
+                relevant.append(enriched)
+            else:
+                filtered.append({
+                    "name": orig.get("name"),
+                    "platform": orig.get("platform"),
+                    "filter_reason": "Filtered by AI"
+                })
+
+        if ai_filtered:
+            return relevant, ai_filtered
+        return relevant, filtered
+
     async def _generate_content(self, prompt: str) -> tuple[str, Dict[str, Optional[int]]]:
         if self.use_http:
             return await self._generate_content_http(prompt)
@@ -360,6 +419,11 @@ class GeminiService:
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
             result = self._parse_json_text(text)
+            ai_relevant = result.get("relevant_products", [])
+            ai_filtered = result.get("filtered_out", [])
+            relevant, filtered = self._apply_ai_filter(ai_relevant, ai_filtered, products)
+            result["relevant_products"] = relevant
+            result["filtered_out"] = filtered
             result["ai_powered"] = True
             result["ai_meta"] = {
                 "model": self.model_name,
@@ -367,12 +431,6 @@ class GeminiService:
                 "token_usage": usage,
                 "transport": "http" if self.use_http else "sdk"
             }
-            
-            # Map back to full product data
-            result["relevant_products"] = self._enrich_products(
-                result.get("relevant_products", []), 
-                products
-            )
             
             return result
             
@@ -664,16 +722,22 @@ JSON only, no explanation:"""
         enriched = []
         
         for ai_prod in ai_products:
+            if not isinstance(ai_prod, dict):
+                ai_prod = {"name": str(ai_prod)}
             # Find matching original product
-            name = ai_prod.get("name", "").lower()
-            platform = ai_prod.get("platform", "").lower()
+            name = str(ai_prod.get("name", "")).lower()
+            platform = str(ai_prod.get("platform", "")).lower()
+            if not name:
+                enriched.append(ai_prod)
+                continue
             
             for orig in original_products:
-                orig_name = orig.get("name", "").lower()
-                orig_platform = orig.get("platform", "").lower()
+                orig_name = str(orig.get("name", "")).lower()
+                orig_platform = str(orig.get("platform", "")).lower()
                 
                 # Match by name similarity and platform
-                if platform in orig_platform or orig_platform in platform:
+                platform_matches = not platform or platform in orig_platform or orig_platform in platform
+                if platform_matches:
                     if name in orig_name or orig_name in name or \
                        self._name_similarity(name, orig_name) > 0.8:
                         # Merge AI insights with original data
