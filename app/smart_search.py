@@ -248,7 +248,7 @@ class SmartSearch:
         filtered = []
         
         for product in products:
-            name = product.get("name", "").lower()
+            name = str(product.get("name") or "").lower()
             
             # Check if product is relevant
             is_relevant, reason = self._is_relevant(
@@ -284,7 +284,7 @@ class SmartSearch:
         Check if a product is relevant to the search query.
         Returns (is_relevant, reason)
         """
-        name_lower = product_name.lower()
+        name_lower = str(product_name or "").lower()
         
         # 1. Check for compound word traps
         if primary_keyword in self.COMPOUND_TRAPS:
@@ -369,7 +369,7 @@ class SmartSearch:
         primary_keyword: str
     ) -> int:
         """Calculate relevance score (0-100) for a product"""
-        name_lower = product_name.lower()
+        name_lower = str(product_name or "").lower()
         words = name_lower.split()
         score = 50  # Base score
         
@@ -415,7 +415,7 @@ class SmartSearch:
         extra_filtered = []
         
         for product in products:
-            name = product.get("name", "").lower()
+            name = str(product.get("name") or "").lower()
             
             # Additional check: brand name contains keyword but product is different
             # E.g., "Dairy Milk" chocolate when searching "milk"

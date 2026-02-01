@@ -239,7 +239,7 @@ class ProductMatcher:
     
     def _extract_features(self, product: Dict[str, Any]) -> Dict[str, Any]:
         """Extract brand, quantity, and other features from product name"""
-        name = product.get("name", "")
+        name = str(product.get("name") or "")
         name_lower = name.lower()
         
         features = {
@@ -294,6 +294,7 @@ class ProductMatcher:
     
     def _normalize_name(self, name: str) -> str:
         """Normalize product name for comparison"""
+        name = name or ""
         # Remove special characters, extra spaces
         normalized = re.sub(r'[^\w\s]', ' ', name.lower())
         normalized = re.sub(r'\s+', ' ', normalized).strip()
