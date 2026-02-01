@@ -149,6 +149,34 @@ class SmartSearch:
             relevant = ai_result.get("relevant_products", [])
             filtered = ai_result.get("filtered_out", [])
             query_understanding = ai_result.get("query_understanding", {})
+
+            # If AI returns nothing but we have products, fall back to rules.
+            if not relevant and products:
+                relevant_fallback, filtered_fallback = self._rule_based_filter(
+                    query_normalized,
+                    primary_keyword,
+                    products,
+                    is_product_type_search
+                )
+                relevant_fallback, extra_filtered = self._post_process(
+                    relevant_fallback,
+                    query_normalized,
+                    primary_keyword,
+                    is_product_type_search
+                )
+                filtered_fallback.extend(extra_filtered)
+                if relevant_fallback:
+                    relevant = relevant_fallback
+                    filtered = filtered_fallback
+                    query_understanding = {
+                        "original": query,
+                        "interpreted_as": query,
+                        "is_product_type": is_product_type_search,
+                        "ai_fallback": "rule_based_after_empty_ai"
+                    }
+                    if ai_meta is None:
+                        ai_meta = {}
+                    ai_meta["fallback"] = "rule_based_after_empty_ai"
         else:
             # Fallback to rule-based filtering
             relevant, filtered = self._rule_based_filter(
@@ -163,14 +191,15 @@ class SmartSearch:
                 "is_product_type": is_product_type_search
             }
         
-        # Post-process: apply additional rules
-        relevant, extra_filtered = self._post_process(
-            relevant, 
-            query_normalized,
-            primary_keyword,
-            is_product_type_search
-        )
-        filtered.extend(extra_filtered)
+        # Post-process: apply additional rules (avoid double-applying after fallback)
+        if not (ai_result.get("ai_powered") and ai_meta and ai_meta.get("fallback") == "rule_based_after_empty_ai"):
+            relevant, extra_filtered = self._post_process(
+                relevant,
+                query_normalized,
+                primary_keyword,
+                is_product_type_search
+            )
+            filtered.extend(extra_filtered)
         
         # Sort by relevance score (if available) then price
         relevant = sorted(
