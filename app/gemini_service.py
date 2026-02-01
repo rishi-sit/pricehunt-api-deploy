@@ -197,7 +197,22 @@ class GeminiService:
                 })
 
         if ai_filtered:
-            return relevant, ai_filtered
+            normalized_filtered: List[Dict[str, Any]] = []
+            for item in ai_filtered:
+                if isinstance(item, dict):
+                    if "name" in item or "platform" in item or "filter_reason" in item:
+                        normalized_filtered.append(item)
+                    else:
+                        normalized_filtered.append({
+                            "name": str(item),
+                            "filter_reason": "Filtered by AI"
+                        })
+                else:
+                    normalized_filtered.append({
+                        "name": str(item),
+                        "filter_reason": "Filtered by AI"
+                    })
+            return relevant, normalized_filtered
         return relevant, filtered
 
     async def _generate_content(self, prompt: str) -> tuple[str, Dict[str, Optional[int]]]:
@@ -419,8 +434,16 @@ class GeminiService:
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
             result = self._parse_json_text(text)
-            ai_relevant = result.get("relevant_products", [])
-            ai_filtered = result.get("filtered_out", [])
+            ai_relevant = result.get("relevant_products")
+            if ai_relevant is None:
+                ai_relevant = result.get("relevant_names")
+            if ai_relevant is None:
+                ai_relevant = []
+            ai_filtered = result.get("filtered_out")
+            if ai_filtered is None:
+                ai_filtered = result.get("filtered_names")
+            if ai_filtered is None:
+                ai_filtered = []
             relevant, filtered = self._apply_ai_filter(ai_relevant, ai_filtered, products)
             result["relevant_products"] = relevant
             result["filtered_out"] = filtered
@@ -686,8 +709,9 @@ JSON only, no explanation:"""
             f"mode={strictness}. "
             "Return JSON with keys: "
             "query_understanding{original,interpreted_as,category}, "
-            "relevant_products[{name,price,platform,relevance_score,relevance_reason}], "
-            "filtered_out[{name,platform,filter_reason}]. "
+            "relevant_names[string], "
+            "filtered_names[string]. "
+            "Only use names from the input list (no new items). "
             f"Input products: {products_json}"
         )
     
