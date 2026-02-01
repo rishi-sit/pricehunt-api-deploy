@@ -198,7 +198,7 @@ class ProductMatcher:
             features = item["features"]
             
             # Create grouping key
-            brand = features.get("brand", "").lower()
+            brand = str(features.get("brand") or "").lower()
             qty_value = features.get("quantity_value")
             qty_unit = features.get("quantity_unit")
             
