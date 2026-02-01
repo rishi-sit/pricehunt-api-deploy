@@ -128,7 +128,9 @@ class GeminiService:
         return response.text, self._extract_usage_metadata(response)
 
     async def _generate_content_http(self, prompt: str) -> tuple[str, Dict[str, Optional[int]]]:
-        url = f"{self.http_base_url}/models/{self.model_name}:generateContent"
+        model_name = self.model_name.strip()
+        model_path = model_name if model_name.startswith("models/") else f"models/{model_name}"
+        url = f"{self.http_base_url}/{model_path}:generateContent"
         params = {"key": self.api_key}
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
