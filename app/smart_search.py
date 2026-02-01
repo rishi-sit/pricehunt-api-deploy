@@ -57,7 +57,7 @@ class SmartSearch:
     PRODUCT_TYPES = {
         "juice", "oil", "flour", "powder", "sauce", "jam", "pickle",
         "chips", "biscuit", "chocolate", "bread", "rice", "dal",
-        "sugar", "salt", "tea", "coffee", "butter", "ghee", "cheese"
+        "sugar", "salt", "tea", "coffee", "butter", "ghee", "cheese", "milk"
     }
     
     # Compound word traps (search term vs compound word)
@@ -112,6 +112,7 @@ class SmartSearch:
         query_normalized = query.lower().strip()
         query_words = query_normalized.split()
         primary_keyword = query_words[0] if query_words else query_normalized
+        effective_strict_mode = strict_mode and len(query_words) <= 1
         
         # Check if this is a product type search (don't filter derivatives)
         is_product_type_search = primary_keyword in self.PRODUCT_TYPES
@@ -123,7 +124,7 @@ class SmartSearch:
             ai_result = await self.gemini.filter_relevant_products(
                 query,
                 products,
-                strict_mode=strict_mode and not is_product_type_search
+                strict_mode=effective_strict_mode and not is_product_type_search
             )
         else:
             if not use_ai:

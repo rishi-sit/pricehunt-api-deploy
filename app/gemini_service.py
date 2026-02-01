@@ -10,7 +10,7 @@ import json
 import asyncio
 import time
 import re
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Set
 import google.generativeai as genai
 import httpx
 from pydantic import BaseModel
@@ -66,7 +66,7 @@ class GeminiService:
         self.model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
         self.request_timeout_s = float(os.getenv("GEMINI_TIMEOUT_SEC", "60"))
         self.max_output_tokens = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "512"))
-        self.max_input_products = int(os.getenv("GEMINI_MAX_INPUT_PRODUCTS", "30"))
+        self.max_input_products = int(os.getenv("GEMINI_MAX_INPUT_PRODUCTS", "120"))
         self.temperature = float(os.getenv("GEMINI_TEMPERATURE", "0.1"))
         self.top_p = float(os.getenv("GEMINI_TOP_P", "0.95"))
         self.use_http = os.getenv("GEMINI_USE_HTTP", "1").lower() in {"1", "true", "yes"}
@@ -194,6 +194,70 @@ class GeminiService:
         ai_filtered: List[Any],
         original_products: List[Dict[str, Any]]
     ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        id_map = {idx: prod for idx, prod in enumerate(original_products)}
+        relevant: List[Dict[str, Any]] = []
+        filtered: List[Dict[str, Any]] = []
+        relevant_ids: Set[int] = set()
+
+        def try_parse_id(value: Any) -> Optional[int]:
+            if isinstance(value, bool):
+                return None
+            if isinstance(value, (int, float)):
+                return int(value)
+            if isinstance(value, str) and value.strip().isdigit():
+                return int(value.strip())
+            return None
+
+        # Prefer id-based matching if AI returned ids.
+        for item in ai_relevant:
+            item_id = None
+            item_dict: Dict[str, Any] = {}
+            if isinstance(item, dict):
+                item_dict = item
+                item_id = try_parse_id(item.get("id") or item.get("idx"))
+            else:
+                item_id = try_parse_id(item)
+            if item_id is None:
+                continue
+            orig = id_map.get(item_id)
+            if not orig:
+                continue
+            enriched = {**orig}
+            enriched["relevance_score"] = item_dict.get("relevance_score", 50)
+            enriched["relevance_reason"] = item_dict.get("relevance_reason", "")
+            relevant.append(enriched)
+            relevant_ids.add(item_id)
+
+        if relevant:
+            for idx, orig in enumerate(original_products):
+                if idx in relevant_ids:
+                    continue
+                filtered.append({
+                    "name": orig.get("name"),
+                    "platform": orig.get("platform"),
+                    "filter_reason": "Filtered by AI"
+                })
+            # If AI provided explicit filtered ids, use those when available.
+            explicit_filtered: List[Dict[str, Any]] = []
+            for item in ai_filtered:
+                item_id = None
+                if isinstance(item, dict):
+                    item_id = try_parse_id(item.get("id") or item.get("idx"))
+                else:
+                    item_id = try_parse_id(item)
+                if item_id is None:
+                    continue
+                orig = id_map.get(item_id)
+                if orig:
+                    explicit_filtered.append({
+                        "name": orig.get("name"),
+                        "platform": orig.get("platform"),
+                        "filter_reason": "Filtered by AI"
+                    })
+            if explicit_filtered:
+                return relevant, explicit_filtered
+            return relevant, filtered
+
         ai_items: List[Dict[str, Any]] = []
         for item in ai_relevant:
             if isinstance(item, dict):
@@ -201,8 +265,6 @@ class GeminiService:
             else:
                 ai_items.append({"name": str(item)})
 
-        relevant: List[Dict[str, Any]] = []
-        filtered: List[Dict[str, Any]] = []
         for orig in original_products:
             match = self._match_ai_item(orig, ai_items)
             if match:
@@ -286,6 +348,7 @@ class GeminiService:
                 "model": self.model_name
             }
         prompt = 'Return JSON: {"ok": true}'
+        text = ""
         start_time = time.monotonic()
         try:
             text, usage = await asyncio.wait_for(
@@ -439,13 +502,13 @@ class GeminiService:
                 }
             }
         
-        # Limit products to avoid token limits (prioritize by price)
-        sorted_products = sorted(products, key=lambda x: x.get("price", float("inf")))
-        products_subset = sorted_products[:self.max_input_products]
+        # Limit products to avoid token limits (preserve input order)
+        products_subset = products[:self.max_input_products]
         
         # Build the prompt
         prompt = self._build_filter_prompt(query, products_subset, strict_mode)
         
+        text = ""
         start_time = time.monotonic()
         try:
             text, usage = await asyncio.wait_for(
@@ -456,12 +519,16 @@ class GeminiService:
 
             try:
                 result = self._parse_json_text(text)
-                ai_relevant = result.get("relevant_products")
+                ai_relevant = result.get("relevant_items")
+                if ai_relevant is None:
+                    ai_relevant = result.get("relevant_products")
                 if ai_relevant is None:
                     ai_relevant = result.get("relevant_names")
                 if ai_relevant is None:
                     ai_relevant = []
-                ai_filtered = result.get("filtered_out")
+                ai_filtered = result.get("filtered_ids")
+                if ai_filtered is None:
+                    ai_filtered = result.get("filtered_out")
                 if ai_filtered is None:
                     ai_filtered = result.get("filtered_names")
                 if ai_filtered is None:
@@ -562,6 +629,7 @@ class GeminiService:
         
         prompt = self._build_matching_prompt(products_subset)
         
+        text = ""
         start_time = time.monotonic()
         try:
             text, usage = await asyncio.wait_for(
@@ -728,22 +796,44 @@ JSON only, no explanation:"""
         strict_mode: bool
     ) -> str:
         """Build the prompt for product filtering"""
-        
+        query_tokens = [t for t in re.findall(r"[a-z0-9]+", query.lower()) if t]
+        primary_hints = {
+            "milk", "rice", "oil", "sugar", "salt", "tea", "coffee", "flour",
+            "atta", "bread", "butter", "ghee", "cheese", "curd", "yogurt",
+            "paneer", "egg", "eggs", "potato", "onion", "tomato", "apple",
+            "banana", "orange", "chicken", "fish", "mutton", "dal", "lentil",
+            "masala", "spice"
+        }
+        primary_product = next((t for t in query_tokens if t in primary_hints), None)
+        if primary_product is None:
+            primary_product = query_tokens[0] if query_tokens else query.lower().strip()
+        optional_terms = [t for t in query_tokens if t != primary_product]
+
         products_json = json.dumps([
-            {"name": p.get("name", ""), "price": p.get("price", 0), "platform": p.get("platform", "")}
-            for p in products
+            {
+                "id": i,
+                "name": p.get("name", ""),
+                "price": p.get("price", 0),
+                "platform": p.get("platform", "")
+            }
+            for i, p in enumerate(products)
         ], separators=(",", ":"))
-        
+
         strictness = "strict" if strict_mode else "lenient"
-        
+
         return (
             f'Filter grocery products for query "{query}". '
             f"mode={strictness}. "
+            f"Primary product term: {primary_product}. "
+            f"Optional terms: {optional_terms}. "
+            "If query has multiple words, keep items that match the primary product "
+            "even if optional terms are missing, unless clearly a different product type. "
             "Return JSON with keys: "
-            "query_understanding{original,interpreted_as,category}, "
-            "relevant_names[string], "
-            "filtered_names[string]. "
-            "Only use names from the input list (no new items). "
+            "query_understanding{original,interpreted_as,category,primary_product,optional_terms}, "
+            "relevant_items[{id,relevance_score,relevance_reason}], "
+            "filtered_ids[int]. "
+            "Only use ids from the input list (no new items). "
+            "Prefer keeping items when unsure. "
             f"Input products: {products_json}"
         )
     
