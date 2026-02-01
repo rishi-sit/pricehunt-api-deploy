@@ -9,6 +9,7 @@ import os
 import json
 import asyncio
 import time
+import re
 from typing import List, Dict, Optional, Any
 import google.generativeai as genai
 import httpx
@@ -133,7 +134,12 @@ class GeminiService:
         end = cleaned.rfind("}")
         if start != -1 and end != -1 and end > start:
             cleaned = cleaned[start:end + 1]
-        return json.loads(cleaned)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Retry with a simple trailing-comma cleanup.
+            cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+            return json.loads(cleaned)
 
     async def _generate_content(self, prompt: str) -> tuple[str, Dict[str, Optional[int]]]:
         if self.use_http:
