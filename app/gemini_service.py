@@ -121,6 +121,20 @@ class GeminiService:
             "total_token_count": usage.get("totalTokenCount")
         }
 
+    def _parse_json_text(self, text: str) -> Dict[str, Any]:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            raise ValueError("empty_response")
+        if cleaned.startswith("```"):
+            cleaned = cleaned.strip("`").strip()
+            if cleaned.lower().startswith("json"):
+                cleaned = cleaned[4:].strip()
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            cleaned = cleaned[start:end + 1]
+        return json.loads(cleaned)
+
     async def _generate_content(self, prompt: str) -> tuple[str, Dict[str, Optional[int]]]:
         if self.use_http:
             return await self._generate_content_http(prompt)
@@ -339,7 +353,7 @@ class GeminiService:
             )
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
-            result = json.loads(text)
+            result = self._parse_json_text(text)
             result["ai_powered"] = True
             result["ai_meta"] = {
                 "model": self.model_name,
@@ -385,7 +399,8 @@ class GeminiService:
                 "ai_meta": {
                     "model": self.model_name,
                     "latency_ms": elapsed_ms,
-                    "timeout": False
+                    "timeout": False,
+                    "response_preview": (text or "")[:200]
                 }
             }
     
@@ -436,7 +451,7 @@ class GeminiService:
             )
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
-            result = json.loads(text)
+            result = self._parse_json_text(text)
             result["ai_powered"] = True
             result["ai_meta"] = {
                 "model": self.model_name,
@@ -487,7 +502,8 @@ class GeminiService:
                 "ai_meta": {
                     "model": self.model_name,
                     "latency_ms": elapsed_ms,
-                    "timeout": False
+                    "timeout": False,
+                    "response_preview": (text or "")[:200]
                 }
             }
     
@@ -546,7 +562,7 @@ JSON only, no explanation:"""
             )
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
-            result = json.loads(text)
+            result = self._parse_json_text(text)
             result["ai_powered"] = True
             result["ai_meta"] = {
                 "model": self.model_name,
@@ -581,7 +597,8 @@ JSON only, no explanation:"""
                 "ai_meta": {
                     "model": self.model_name,
                     "latency_ms": elapsed_ms,
-                    "timeout": False
+                    "timeout": False,
+                    "response_preview": (text or "")[:200]
                 }
             }
     
