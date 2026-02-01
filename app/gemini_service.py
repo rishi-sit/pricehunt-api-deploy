@@ -144,6 +144,27 @@ class GeminiService:
     def _normalize_text(self, text: str) -> str:
         return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", str(text).lower())).strip()
 
+    def _extract_relevant_names(self, text: str) -> List[str]:
+        if not text:
+            return []
+        # Try to parse relevant_names array.
+        match = re.search(r'"relevant_names"\s*:\s*\[(.*?)\]', text, re.S)
+        if match:
+            names = re.findall(r'"([^"]+)"', match.group(1))
+            if names:
+                return names
+        # Fallback: grab "name" fields from relevant_products.
+        names = re.findall(r'"name"\s*:\s*"([^"]+)"', text)
+        if names:
+            return names
+        # Fallback: bullet list lines.
+        lines = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("-", "•")):
+                lines.append(stripped.lstrip("-• ").strip())
+        return [name for name in lines if name]
+
     def _match_ai_item(self, orig: Dict[str, Any], ai_items: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         orig_name = self._normalize_text(orig.get("name", ""))
         if not orig_name:
@@ -433,17 +454,28 @@ class GeminiService:
             )
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
-            result = self._parse_json_text(text)
-            ai_relevant = result.get("relevant_products")
-            if ai_relevant is None:
-                ai_relevant = result.get("relevant_names")
-            if ai_relevant is None:
-                ai_relevant = []
-            ai_filtered = result.get("filtered_out")
-            if ai_filtered is None:
-                ai_filtered = result.get("filtered_names")
-            if ai_filtered is None:
+            try:
+                result = self._parse_json_text(text)
+                ai_relevant = result.get("relevant_products")
+                if ai_relevant is None:
+                    ai_relevant = result.get("relevant_names")
+                if ai_relevant is None:
+                    ai_relevant = []
+                ai_filtered = result.get("filtered_out")
+                if ai_filtered is None:
+                    ai_filtered = result.get("filtered_names")
+                if ai_filtered is None:
+                    ai_filtered = []
+            except Exception:
+                # Salvage AI output by extracting names from raw text.
+                ai_relevant = self._extract_relevant_names(text)
                 ai_filtered = []
+                result = {
+                    "query_understanding": {"original": query, "interpreted_as": query},
+                    "relevant_names": ai_relevant,
+                    "filtered_names": ai_filtered
+                }
+
             relevant, filtered = self._apply_ai_filter(ai_relevant, ai_filtered, products)
             result["relevant_products"] = relevant
             result["filtered_out"] = filtered
