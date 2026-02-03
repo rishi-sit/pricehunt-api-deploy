@@ -116,7 +116,7 @@ class AIService:
         
         self.providers[self.PROVIDER_GROQ] = {
             "api_key": api_key,
-            "model": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+            "model": os.getenv("GROQ_MODEL", "mixtral-8x7b-32768"),
             "base_url": "https://api.groq.com/openai/v1",
             "type": "openai_compatible"
         }
