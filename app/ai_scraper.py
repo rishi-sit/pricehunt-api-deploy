@@ -1,49 +1,147 @@
 """
 AI-Powered Scraper Service for PriceHunt
-Uses Gemini to extract products from raw HTML when standard extraction fails.
+Uses AI (Mistral or Gemini) to extract products from raw HTML when standard extraction fails.
 
 This is the FALLBACK for client-side scraping failures.
 When Android app's WebView scraping fails, it sends the raw HTML to this endpoint
-and Gemini AI extracts products intelligently.
+and AI extracts products intelligently.
 """
 import os
 import json
 import asyncio
 import re
 from typing import List, Dict, Optional, Any
-import google.generativeai as genai
+import httpx
 
 
 class AIScraper:
     """
     AI-powered product extraction from raw HTML.
-    Uses Gemini's understanding of HTML structure to extract products
+    Uses AI's understanding of HTML structure to extract products
     even when traditional scraping fails.
+    
+    Supports: Mistral AI (default), Google Gemini (fallback)
     """
     
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+    PROVIDER_MISTRAL = "mistral"
+    PROVIDER_GEMINI = "gemini"
+    
+    def __init__(self, api_key: Optional[str] = None, provider: Optional[str] = None):
+        self.provider = (provider or os.getenv("AI_PROVIDER", "mistral")).lower()
+        self.temperature = 0.1
+        self.top_p = 0.95
+        self.max_output_tokens = 8192
+        self.request_timeout_s = 90.0
+        
+        if self.provider == self.PROVIDER_MISTRAL:
+            self._setup_mistral(api_key)
+        else:
+            self._setup_gemini(api_key)
+    
+    def _setup_mistral(self, api_key: Optional[str] = None):
+        """Setup Mistral AI provider"""
+        self.api_key = api_key or os.getenv("MISTRAL_API_KEY") or os.getenv("AI_API_KEY")
+        self.model_name = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
+        self.base_url = os.getenv("MISTRAL_BASE_URL", "https://api.mistral.ai/v1")
+        
         if not self.api_key:
-            print("⚠️ GEMINI_API_KEY not set - AI scraper will be disabled")
-            self.model = None
+            print("⚠️ MISTRAL_API_KEY not set - AI scraper will be disabled")
+            self._available = False
             return
         
-        genai.configure(api_key=self.api_key)
-        
-        # Use Gemini 2.5 Flash for speed
-        self.model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            generation_config={
-                "temperature": 0.1,
-                "top_p": 0.95,
-                "max_output_tokens": 8192,
-                "response_mime_type": "application/json"
-            }
+        self._available = True
+        print(f"✅ AI Scraper initialized (Mistral: {self.model_name})")
+    
+    def _setup_gemini(self, api_key: Optional[str] = None):
+        """Setup Google Gemini provider"""
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        self.model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+        self.base_url = os.getenv(
+            "GEMINI_HTTP_BASE_URL",
+            "https://generativelanguage.googleapis.com/v1beta"
         )
-        print("✅ AI Scraper initialized (Gemini 2.5 Flash)")
+        
+        if not self.api_key:
+            print("⚠️ GEMINI_API_KEY not set - AI scraper will be disabled")
+            self._available = False
+            return
+        
+        self._available = True
+        print(f"✅ AI Scraper initialized (Gemini: {self.model_name})")
     
     def is_available(self) -> bool:
-        return self.model is not None
+        return self._available
+    
+    async def _generate_content(self, prompt: str) -> str:
+        """Generate content using the configured provider"""
+        if self.provider == self.PROVIDER_MISTRAL:
+            return await self._generate_mistral(prompt)
+        else:
+            return await self._generate_gemini(prompt)
+    
+    async def _generate_mistral(self, prompt: str) -> str:
+        """Generate content using Mistral AI API"""
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an expert web scraper. Extract product information from HTML. Always respond with valid JSON only."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "max_tokens": self.max_output_tokens,
+            "response_format": {"type": "json_object"}
+        }
+        
+        timeout = httpx.Timeout(timeout=self.request_timeout_s, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
+        
+        choices = data.get("choices", [])
+        if choices:
+            return choices[0].get("message", {}).get("content", "")
+        return ""
+    
+    async def _generate_gemini(self, prompt: str) -> str:
+        """Generate content using Google Gemini API"""
+        model_path = self.model_name if self.model_name.startswith("models/") else f"models/{self.model_name}"
+        url = f"{self.base_url}/{model_path}:generateContent"
+        params = {"key": self.api_key}
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": self.temperature,
+                "topP": self.top_p,
+                "maxOutputTokens": self.max_output_tokens,
+                "responseMimeType": "application/json"
+            }
+        }
+        
+        timeout = httpx.Timeout(timeout=self.request_timeout_s, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(url, params=params, json=payload)
+            response.raise_for_status()
+            data = response.json()
+        
+        candidates = data.get("candidates", [])
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            if parts:
+                return parts[0].get("text", "")
+        return ""
     
     async def extract_products_from_html(
         self,
@@ -92,11 +190,20 @@ class AIScraper:
         )
         
         try:
-            response = await asyncio.to_thread(
-                self.model.generate_content, prompt
-            )
+            response_text = await self._generate_content(prompt)
             
-            result = json.loads(response.text)
+            # Parse JSON from response
+            cleaned = response_text.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.strip("`").strip()
+                if cleaned.lower().startswith("json"):
+                    cleaned = cleaned[4:].strip()
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                cleaned = cleaned[start:end + 1]
+            
+            result = json.loads(cleaned)
             
             # Validate and enrich products
             products = self._validate_products(
@@ -238,6 +345,8 @@ EXTRACTION RULES:
 2. Extract: name, price (in INR ₹), original_price (if discounted), image_url, product_url
 3. Price format: Look for ₹ or Rs. followed by numbers (e.g., ₹45, Rs. 120, Rs 99)
 4. Product names are usually in img alt text, h2/h3/h4 tags, or link text
+5. If size/quantity/pack info is visible (e.g., 500ml, 1kg, pack of 6),
+   include it in the product name so the client can compute per-unit price.
 5. Image URLs often contain "cdn", "image", "product" in the path
 6. Product URLs often contain "/p/", "/product/", "/dp/", "/prn/", "/item/"
 7. If product_url is relative (starts with /), prepend the base_url
@@ -292,6 +401,19 @@ JSON only:"""
         for p in products:
             name = p.get("name", "").strip()
             price = p.get("price")
+
+            quantity_hint = (
+                str(p.get("quantity") or p.get("size") or p.get("pack_size") or p.get("packSize") or "")
+            ).strip()
+            if quantity_hint and quantity_hint.lower() not in name.lower():
+                number_match = re.search(r"(\d+(?:\.\d+)?)", quantity_hint)
+                if number_match:
+                    if float(number_match.group(1)) <= 0:
+                        quantity_hint = ""
+                if quantity_hint:
+                    candidate = f"{name} {quantity_hint}".strip()
+                    if len(candidate) <= 150:
+                        name = candidate
             
             # Skip invalid products
             if not name or len(name) < 3 or len(name) > 150:

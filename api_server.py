@@ -27,7 +27,7 @@ from app.scrapers.instamart import InstamartScraper
 # AI-powered modules
 from app.smart_search import get_smart_search
 from app.product_matcher import get_product_matcher
-from app.gemini_service import get_gemini_service
+from app.ai_service import get_ai_service as get_gemini_service
 
 MAX_PLATFORM_ITEMS = 10
 

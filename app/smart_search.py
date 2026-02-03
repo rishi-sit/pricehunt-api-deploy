@@ -11,7 +11,7 @@ This module handles:
 import re
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
-from .gemini_service import get_gemini_service
+from .ai_service import get_ai_service as get_gemini_service
 
 
 @dataclass
