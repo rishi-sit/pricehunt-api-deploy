@@ -956,28 +956,26 @@ JSON only, no explanation:"""
             for i, p in enumerate(products)
         ], separators=(",", ":"))
 
-        return f'''Task: Filter grocery products for search "{query}".
+        return f'''Score each product's relevance to "{query}" from 0-100.
 
-Input: {products_json}
+Products: {products_json}
 
-Rules:
-1. KEEP: Products that ARE the actual {query} (fresh produce, packaged {query})
-2. REMOVE: Products made FROM {query} (chips, shake, juice, flavoured items, powder)
+Scoring guide for "{query}":
+- 90-100: The product IS {query} itself (e.g., "Fresh Banana", "Toned Milk", "Basmati Rice")
+- 70-89: Related {query} variant (e.g., "Raw Banana", "Full Cream Milk")  
+- 40-69: {query} derivative that user might want (e.g., "Rice Flour")
+- 0-39: NOT {query}, just contains the word (e.g., "Banana Chips", "Milkshake", "Dairy Milk chocolate")
 
-Examples of what to KEEP for "banana":
-- "Fresh Yellow Banana 6pc" → KEEP (it's actual bananas)
-- "Organic Banana 1kg" → KEEP (it's actual bananas)
-- "Raw Green Banana 500g" → KEEP (it's actual bananas)
-- "Robusta Banana" → KEEP (it's actual bananas)
+Examples for "banana":
+- "Fresh Yellow Banana 6pc" = 95 (IS banana)
+- "Organic Banana 1kg" = 95 (IS banana)
+- "Banana Chips" = 20 (processed snack)
+- "Banana Shake" = 15 (beverage)
 
-Examples of what to REMOVE for "banana":
-- "Banana Chips" → REMOVE (chips made from banana)
-- "Banana Shake" → REMOVE (beverage)
-- "Banana Flavoured Milk" → REMOVE (flavoured product)
+Return JSON: {{"relevant_items":[{{"id":0,"relevance_score":95,"relevance_reason":"actual banana"}}],"filtered_ids":[3,4]}}
 
-Output format: {{"relevant_items":[{{"id":0,"relevance_score":95,"relevance_reason":"fresh banana"}}],"filtered_ids":[1,3]}}
-
-CRITICAL: "Fresh", "Yellow", "6pc", "1kg" are descriptors of actual {query} - KEEP these products!'''
+Include in relevant_items: ALL products with score >= 50
+Include in filtered_ids: ALL products with score < 50'''
     
     def _build_matching_prompt(self, products: List[Dict]) -> str:
         """Build the prompt for product matching"""
