@@ -67,10 +67,10 @@ class AIScraper:
             return
         self.providers[self.PROVIDER_GROQ] = {
             "api_key": api_key,
-            "model": os.getenv("GROQ_MODEL", "mixtral-8x7b-32768"),
+            "model": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
             "base_url": "https://api.groq.com/openai/v1",
             "type": "openai_compatible",
-            "supports_json_mode": False  # mixtral doesn't reliably support response_format
+            "supports_json_mode": True  # llama-3.1 supports JSON mode
         }
     
     def _setup_mistral(self):
