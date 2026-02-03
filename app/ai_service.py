@@ -186,7 +186,8 @@ class AIService:
             "api_key": api_key,
             "model": os.getenv("GROQ_MODEL", "mixtral-8x7b-32768"),
             "base_url": "https://api.groq.com/openai/v1",
-            "type": "openai_compatible"
+            "type": "openai_compatible",
+            "supports_json_mode": False  # mixtral doesn't reliably support response_format
         }
     
     def _setup_mistral(self):
@@ -199,7 +200,8 @@ class AIService:
             "api_key": api_key,
             "model": os.getenv("MISTRAL_MODEL", "mistral-small-latest"),
             "base_url": "https://api.mistral.ai/v1",
-            "type": "openai_compatible"
+            "type": "openai_compatible",
+            "supports_json_mode": True  # Mistral supports JSON mode
         }
     
     def _setup_gemini(self):
@@ -295,7 +297,7 @@ class AIService:
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are a helpful assistant that analyzes grocery products. Always respond with valid JSON only, no explanation."
+                    "content": "You are a helpful assistant that analyzes grocery products. Always respond with valid JSON only, no markdown, no explanation."
                 },
                 {
                     "role": "user",
@@ -304,9 +306,13 @@ class AIService:
             ],
             "temperature": self.temperature,
             "top_p": self.top_p,
-            "max_tokens": self.max_output_tokens,
-            "response_format": {"type": "json_object"}
+            "max_tokens": self.max_output_tokens
         }
+        
+        # Only add response_format for providers/models that support it
+        # Mistral supports it, Groq's mixtral may not
+        if config.get("supports_json_mode", False):
+            payload["response_format"] = {"type": "json_object"}
         
         timeout = httpx.Timeout(
             timeout=self.request_timeout_s,
