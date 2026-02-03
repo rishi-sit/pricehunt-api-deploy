@@ -187,7 +187,7 @@ class AIService:
             "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
             "base_url": "https://api.groq.com/openai/v1",
             "type": "openai_compatible",
-            "supports_json_mode": True  # llama-3.3 supports JSON mode
+            "supports_json_mode": False  # Disable to debug HTTP 400
         }
     
     def _setup_mistral(self):
@@ -322,6 +322,9 @@ class AIService:
         
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(url, headers=headers, json=payload)
+            if response.status_code != 200:
+                error_text = response.text[:500] if response.text else "No error body"
+                print(f"❌ API Error {response.status_code} from {config.get('model')}: {error_text}")
             response.raise_for_status()
             data = response.json()
         
