@@ -184,10 +184,10 @@ class AIService:
         
         self.providers[self.PROVIDER_GROQ] = {
             "api_key": api_key,
-            "model": os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile"),
+            "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
             "base_url": "https://api.groq.com/openai/v1",
             "type": "openai_compatible",
-            "supports_json_mode": True  # llama-3.1 supports JSON mode
+            "supports_json_mode": True  # llama-3.3 supports JSON mode
         }
     
     def _setup_mistral(self):
