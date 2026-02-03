@@ -100,7 +100,8 @@ class AIScraper:
     
     def _get_available_providers(self) -> List[str]:
         """Get list of providers that are configured AND not quota-exhausted"""
-        priority = [self.PROVIDER_GROQ, self.PROVIDER_MISTRAL, self.PROVIDER_GEMINI]
+        # Priority order: Mistral (accurate) > Groq (fast) > Gemini
+        priority = [self.PROVIDER_MISTRAL, self.PROVIDER_GROQ, self.PROVIDER_GEMINI]
         available = []
         for p in priority:
             if p in self.providers and self.quota.is_available(p):
