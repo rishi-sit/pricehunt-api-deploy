@@ -2,8 +2,11 @@
 AI-Powered Scraper Service for PriceHunt
 Uses AI to extract products from raw HTML when standard extraction fails.
 
-Priority: Groq (fastest) > Mistral > Gemini
-Automatically falls back to next provider on quota/rate limit errors.
+Smart Quota Management:
+- Primary: Groq (fastest, 6000 req/day free)
+- Fallback: Mistral AI (1B tokens/month free)  
+- Fallback: Google Gemini
+- Auto-switches when quota exceeded, resets daily at midnight UTC
 
 This is the FALLBACK for client-side scraping failures.
 When Android app's WebView scraping fails, it sends the raw HTML to this endpoint
@@ -16,6 +19,9 @@ import re
 from typing import List, Dict, Optional, Any
 import httpx
 
+# Import shared quota tracker from ai_service
+from .ai_service import _quota_tracker
+
 
 class AIScraper:
     """
@@ -23,7 +29,7 @@ class AIScraper:
     Uses AI's understanding of HTML structure to extract products
     even when traditional scraping fails.
     
-    Supports: Groq (primary), Mistral AI (fallback), Google Gemini (fallback)
+    Uses shared quota tracker with AIService for coordinated quota management.
     """
     
     PROVIDER_GROQ = "groq"
@@ -38,18 +44,19 @@ class AIScraper:
         self.max_output_tokens = 8192
         self.request_timeout_s = 90.0
         
+        # Use shared quota tracker
+        self.quota = _quota_tracker
+        
         # Setup all available providers
         self.providers: Dict[str, Dict[str, Any]] = {}
         self._setup_groq()
         self._setup_mistral()
         self._setup_gemini()
         
-        # Determine primary provider
-        self.provider = self._get_primary_provider()
-        self._available = self.provider is not None
+        self._available = len(self.providers) > 0
         
         if self._available:
-            print(f"✅ AI Scraper initialized (primary: {self.provider})")
+            print(f"✅ AI Scraper initialized (providers: {list(self.providers.keys())})")
         else:
             print("⚠️ No AI providers configured - AI scraper disabled")
     
@@ -89,20 +96,23 @@ class AIScraper:
             "type": "gemini"
         }
     
-    def _get_primary_provider(self) -> Optional[str]:
-        """Get primary provider based on priority"""
-        for provider in [self.PROVIDER_GROQ, self.PROVIDER_MISTRAL, self.PROVIDER_GEMINI]:
-            if provider in self.providers:
-                return provider
-        return None
+    def _get_available_providers(self) -> List[str]:
+        """Get list of providers that are configured AND not quota-exhausted"""
+        priority = [self.PROVIDER_GROQ, self.PROVIDER_MISTRAL, self.PROVIDER_GEMINI]
+        available = []
+        for p in priority:
+            if p in self.providers and self.quota.is_available(p):
+                available.append(p)
+        return available
     
-    def _get_fallback_providers(self, failed_provider: str) -> List[str]:
-        """Get list of fallback providers"""
-        all_providers = [self.PROVIDER_GROQ, self.PROVIDER_MISTRAL, self.PROVIDER_GEMINI]
-        return [p for p in all_providers if p in self.providers and p != failed_provider]
+    @property
+    def provider(self) -> Optional[str]:
+        """Current primary provider (dynamic based on quota)"""
+        available = self._get_available_providers()
+        return available[0] if available else None
     
     def is_available(self) -> bool:
-        return self._available
+        return self._available and len(self._get_available_providers()) > 0
     
     async def _generate_content(self, prompt: str, provider: Optional[str] = None) -> str:
         """Generate content using specified provider"""
@@ -183,16 +193,27 @@ class AIScraper:
         return ""
     
     async def _generate_with_fallback(self, prompt: str) -> tuple[str, str]:
-        """Generate content with automatic fallback. Returns (text, provider_used)"""
-        providers_to_try = [self.provider] + self._get_fallback_providers(self.provider)
+        """Generate content with automatic fallback and quota tracking. Returns (text, provider_used)"""
+        providers_to_try = self._get_available_providers()
+        
+        if not providers_to_try:
+            raise Exception("All AI providers exhausted for today")
+        
         last_error = None
         
         for provider in providers_to_try:
             try:
                 text = await self._generate_content(prompt, provider)
+                # Record successful request
+                self.quota.record_request(provider)
                 return text, provider
             except httpx.HTTPStatusError as e:
                 last_error = f"HTTP {e.response.status_code}"
+                if e.response.status_code == 429:
+                    # Quota exceeded - mark as exhausted for today
+                    self.quota.mark_exhausted(provider)
+                    print(f"🔄 AI Scraper: {provider} quota exceeded, switching to fallback...")
+                    continue
                 if e.response.status_code in self.RATE_LIMIT_CODES:
                     print(f"⚠️ AI Scraper: {provider} rate limited, trying fallback...")
                     continue

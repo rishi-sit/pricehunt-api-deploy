@@ -1,9 +1,15 @@
 """
 AI Service for PriceHunt
-Supports multiple AI providers with automatic fallback:
+Supports multiple AI providers with smart quota management:
 - Primary: Groq (fastest, 6000 req/day free)
 - Fallback: Mistral AI (1B tokens/month free)
 - Fallback: Google Gemini
+
+Smart Quota Management:
+- Tracks daily usage for each provider
+- Auto-switches when quota exceeded (HTTP 429)
+- Resets back to primary (Groq) at midnight UTC
+- Maximizes free tier usage across all providers
 
 Handles all interactions with AI for:
 1. Smart search filtering
@@ -15,6 +21,7 @@ import json
 import asyncio
 import time
 import re
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Any, Set
 import httpx
 from pydantic import BaseModel
@@ -60,17 +67,78 @@ class ProductGroup(BaseModel):
     price_range: str
 
 
+class QuotaTracker:
+    """
+    Tracks API quota usage per provider with daily reset.
+    When a provider hits quota limit (429), marks it as exhausted for the day.
+    Resets all providers back to available at midnight UTC.
+    """
+    
+    def __init__(self):
+        self._exhausted_providers: Dict[str, str] = {}  # provider -> date_exhausted
+        self._request_counts: Dict[str, int] = {}  # provider -> count today
+        self._last_reset_date: str = self._get_today()
+    
+    def _get_today(self) -> str:
+        """Get today's date in UTC as string"""
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    def _check_daily_reset(self):
+        """Reset quota tracking if it's a new day"""
+        today = self._get_today()
+        if today != self._last_reset_date:
+            print(f"🔄 New day ({today}) - resetting all provider quotas")
+            self._exhausted_providers.clear()
+            self._request_counts.clear()
+            self._last_reset_date = today
+    
+    def mark_exhausted(self, provider: str):
+        """Mark a provider as quota-exhausted for today"""
+        self._check_daily_reset()
+        today = self._get_today()
+        self._exhausted_providers[provider] = today
+        count = self._request_counts.get(provider, 0)
+        print(f"⚠️ {provider} quota exhausted for {today} (after {count} requests)")
+    
+    def is_available(self, provider: str) -> bool:
+        """Check if provider is available (not quota-exhausted today)"""
+        self._check_daily_reset()
+        return provider not in self._exhausted_providers
+    
+    def record_request(self, provider: str):
+        """Record a successful request to a provider"""
+        self._check_daily_reset()
+        self._request_counts[provider] = self._request_counts.get(provider, 0) + 1
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get current quota status"""
+        self._check_daily_reset()
+        return {
+            "date": self._last_reset_date,
+            "request_counts": dict(self._request_counts),
+            "exhausted_providers": list(self._exhausted_providers.keys()),
+            "available_providers": [p for p in ["groq", "mistral", "gemini"] 
+                                   if p not in self._exhausted_providers]
+        }
+
+
+# Global quota tracker (shared across requests)
+_quota_tracker = QuotaTracker()
+
+
 class AIService:
     """
-    Unified AI Service supporting multiple providers with automatic fallback.
+    Unified AI Service supporting multiple providers with smart quota management.
     
     Priority order:
-    1. Groq (fastest - uses custom LPU hardware, ~18x faster than GPU)
+    1. Groq (fastest - uses custom LPU hardware)
     2. Mistral AI (1B tokens/month free)
     3. Google Gemini (fallback)
     
-    If primary provider fails (quota exceeded, timeout, error), 
-    automatically falls back to the next available provider.
+    Smart quota handling:
+    - If provider returns 429 (quota exceeded), marks it exhausted for the day
+    - Automatically falls back to next available provider
+    - At midnight UTC, resets and tries Groq again
     """
     
     # Provider constants
@@ -95,16 +163,16 @@ class AIService:
         self._setup_mistral()
         self._setup_gemini()
         
-        # Determine primary provider (first available)
-        self.provider = self._get_primary_provider()
-        self._available = self.provider is not None
+        # Reference to global quota tracker
+        self.quota = _quota_tracker
+        
+        # Check availability
+        self._available = len(self.providers) > 0
         
         if self._available:
             print(f"✅ AI Service initialized")
-            print(f"   Primary: {self.provider} ({self.providers[self.provider]['model']})")
-            fallbacks = [p for p in self.providers if p != self.provider]
-            if fallbacks:
-                print(f"   Fallbacks: {', '.join(fallbacks)}")
+            for name, config in self.providers.items():
+                print(f"   ✓ {name}: {config['model']}")
         else:
             print("⚠️ No AI providers configured - AI features disabled")
     
@@ -120,7 +188,6 @@ class AIService:
             "base_url": "https://api.groq.com/openai/v1",
             "type": "openai_compatible"
         }
-        print(f"   ✓ Groq configured (model: {self.providers[self.PROVIDER_GROQ]['model']})")
     
     def _setup_mistral(self):
         """Setup Mistral AI provider"""
@@ -134,7 +201,6 @@ class AIService:
             "base_url": "https://api.mistral.ai/v1",
             "type": "openai_compatible"
         }
-        print(f"   ✓ Mistral configured (model: {self.providers[self.PROVIDER_MISTRAL]['model']})")
     
     def _setup_gemini(self):
         """Setup Google Gemini provider"""
@@ -148,31 +214,45 @@ class AIService:
             "base_url": "https://generativelanguage.googleapis.com/v1beta",
             "type": "gemini"
         }
-        print(f"   ✓ Gemini configured (model: {self.providers[self.PROVIDER_GEMINI]['model']})")
+    
+    def _get_available_providers(self) -> List[str]:
+        """Get list of providers that are configured AND not quota-exhausted"""
+        # Priority order: Groq > Mistral > Gemini
+        priority = [self.PROVIDER_GROQ, self.PROVIDER_MISTRAL, self.PROVIDER_GEMINI]
+        available = []
+        for p in priority:
+            if p in self.providers and self.quota.is_available(p):
+                available.append(p)
+        return available
     
     def _get_primary_provider(self) -> Optional[str]:
-        """Get primary provider based on priority and availability"""
-        # Priority: Groq > Mistral > Gemini
-        for provider in [self.PROVIDER_GROQ, self.PROVIDER_MISTRAL, self.PROVIDER_GEMINI]:
-            if provider in self.providers:
-                return provider
-        return None
+        """Get the best available provider right now"""
+        available = self._get_available_providers()
+        return available[0] if available else None
     
-    def _get_fallback_providers(self, failed_provider: str) -> List[str]:
-        """Get list of fallback providers after a failure"""
-        all_providers = [self.PROVIDER_GROQ, self.PROVIDER_MISTRAL, self.PROVIDER_GEMINI]
-        return [p for p in all_providers if p in self.providers and p != failed_provider]
+    @property
+    def provider(self) -> Optional[str]:
+        """Current primary provider (dynamic based on quota)"""
+        return self._get_primary_provider()
     
     @property
     def model_name(self) -> str:
         """Get current provider's model name"""
-        if self.provider and self.provider in self.providers:
-            return self.providers[self.provider]["model"]
+        provider = self.provider
+        if provider and provider in self.providers:
+            return self.providers[provider]["model"]
         return "unknown"
     
     def is_available(self) -> bool:
-        """Check if any AI provider is configured"""
-        return self._available
+        """Check if any AI provider is available"""
+        return self._available and len(self._get_available_providers()) > 0
+    
+    def get_quota_stats(self) -> Dict[str, Any]:
+        """Get current quota usage statistics"""
+        stats = self.quota.get_stats()
+        stats["current_provider"] = self.provider
+        stats["configured_providers"] = list(self.providers.keys())
+        return stats
     
     async def _generate_content(
         self, 
@@ -180,7 +260,7 @@ class AIService:
         provider: Optional[str] = None
     ) -> tuple[str, Dict[str, Optional[int]], str]:
         """
-        Generate content using specified provider or primary.
+        Generate content using specified provider.
         Returns: (text, usage_info, provider_used)
         """
         provider = provider or self.provider
@@ -193,6 +273,9 @@ class AIService:
             text, usage = await self._generate_openai_compatible(prompt, config)
         else:
             text, usage = await self._generate_gemini(prompt, config)
+        
+        # Record successful request
+        self.quota.record_request(provider)
         
         return text, usage, provider
     
@@ -305,28 +388,45 @@ class AIService:
         prompt: str
     ) -> tuple[str, Dict[str, Optional[int]], str, Optional[str]]:
         """
-        Generate content with automatic fallback on failure.
+        Generate content with automatic fallback on quota exhaustion.
+        
+        When a provider returns 429 (quota exceeded):
+        1. Marks that provider as exhausted for today
+        2. Tries the next available provider
+        3. Tomorrow, will try the exhausted provider again
+        
         Returns: (text, usage_info, provider_used, fallback_reason)
         """
-        providers_to_try = [self.provider] + self._get_fallback_providers(self.provider)
+        providers_to_try = self._get_available_providers()
+        
+        if not providers_to_try:
+            raise Exception("All AI providers exhausted for today")
+        
         last_error = None
         fallback_reason = None
+        original_provider = providers_to_try[0]
         
         for i, provider in enumerate(providers_to_try):
             try:
                 text, usage, used_provider = await self._generate_content(prompt, provider)
                 if i > 0:
-                    fallback_reason = f"Fallback from {providers_to_try[0]}: {last_error}"
+                    fallback_reason = f"Switched from {original_provider}: {last_error}"
                 return text, usage, used_provider, fallback_reason
                 
             except httpx.HTTPStatusError as e:
                 last_error = f"HTTP {e.response.status_code}"
-                if e.response.status_code in self.RATE_LIMIT_CODES:
+                
+                if e.response.status_code == 429:
+                    # Quota exceeded - mark as exhausted for today
+                    self.quota.mark_exhausted(provider)
+                    print(f"🔄 {provider} quota exceeded, switching to fallback...")
+                    continue
+                elif e.response.status_code in self.RATE_LIMIT_CODES:
                     print(f"⚠️ {provider} rate limited (HTTP {e.response.status_code}), trying fallback...")
                     continue
-                # For other HTTP errors, still try fallback
-                print(f"⚠️ {provider} error: {last_error}, trying fallback...")
-                continue
+                else:
+                    print(f"⚠️ {provider} error: {last_error}, trying fallback...")
+                    continue
                 
             except asyncio.TimeoutError:
                 last_error = "timeout"
@@ -510,7 +610,7 @@ class AIService:
             return {
                 "ok": False,
                 "error": "ai_unavailable",
-                "providers_configured": list(self.providers.keys())
+                "quota_stats": self.get_quota_stats()
             }
         
         prompt = 'Return JSON: {"ok": true}'
@@ -535,7 +635,8 @@ class AIService:
                 "token_usage": usage,
                 "parsed_ok": parsed,
                 "response_preview": text[:200],
-                "providers_configured": list(self.providers.keys())
+                "providers_configured": list(self.providers.keys()),
+                "quota_stats": self.get_quota_stats()
             }
             if fallback_reason:
                 result["fallback_reason"] = fallback_reason
@@ -547,7 +648,7 @@ class AIService:
                 "ok": False,
                 "timeout": True,
                 "latency_ms": elapsed_ms,
-                "providers_configured": list(self.providers.keys())
+                "quota_stats": self.get_quota_stats()
             }
         except Exception as e:
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
@@ -556,7 +657,7 @@ class AIService:
                 "timeout": False,
                 "latency_ms": elapsed_ms,
                 "error": str(e),
-                "providers_configured": list(self.providers.keys())
+                "quota_stats": self.get_quota_stats()
             }
     
     async def filter_relevant_products(
@@ -567,7 +668,7 @@ class AIService:
     ) -> Dict[str, Any]:
         """
         Use AI to filter products based on search query relevance.
-        Automatically falls back to next provider if primary fails.
+        Automatically falls back to next provider if quota exceeded.
         """
         if not self.is_available():
             return {
@@ -577,7 +678,7 @@ class AIService:
                 "ai_powered": False,
                 "ai_meta": {
                     "ai_available": False,
-                    "providers_configured": list(self.providers.keys())
+                    "quota_stats": self.get_quota_stats()
                 }
             }
         
@@ -614,7 +715,8 @@ class AIService:
                 "provider": provider_used,
                 "model": self.providers[provider_used]["model"],
                 "latency_ms": elapsed_ms,
-                "token_usage": usage
+                "token_usage": usage,
+                "quota_stats": self.get_quota_stats()
             }
             if fallback_reason:
                 result["ai_meta"]["fallback_reason"] = fallback_reason
@@ -633,7 +735,7 @@ class AIService:
                 "ai_meta": {
                     "latency_ms": elapsed_ms,
                     "timeout": True,
-                    "providers_configured": list(self.providers.keys())
+                    "quota_stats": self.get_quota_stats()
                 }
             }
         except Exception as e:
@@ -649,7 +751,7 @@ class AIService:
                     "latency_ms": elapsed_ms,
                     "timeout": False,
                     "response_preview": (text or "")[:200],
-                    "providers_configured": list(self.providers.keys())
+                    "quota_stats": self.get_quota_stats()
                 }
             }
     
@@ -667,7 +769,7 @@ class AIService:
                 "ai_powered": False,
                 "ai_meta": {
                     "ai_available": False,
-                    "providers_configured": list(self.providers.keys())
+                    "quota_stats": self.get_quota_stats()
                 }
             }
         
@@ -689,7 +791,8 @@ class AIService:
                 "provider": provider_used,
                 "model": self.providers[provider_used]["model"],
                 "latency_ms": elapsed_ms,
-                "token_usage": usage
+                "token_usage": usage,
+                "quota_stats": self.get_quota_stats()
             }
             if fallback_reason:
                 result["ai_meta"]["fallback_reason"] = fallback_reason
@@ -721,7 +824,7 @@ class AIService:
                 "ai_meta": {
                     "latency_ms": elapsed_ms,
                     "timeout": True,
-                    "providers_configured": list(self.providers.keys())
+                    "quota_stats": self.get_quota_stats()
                 }
             }
         except Exception as e:
@@ -736,7 +839,7 @@ class AIService:
                     "latency_ms": elapsed_ms,
                     "timeout": False,
                     "response_preview": (text or "")[:200],
-                    "providers_configured": list(self.providers.keys())
+                    "quota_stats": self.get_quota_stats()
                 }
             }
     
@@ -751,7 +854,7 @@ class AIService:
                 "ai_powered": False,
                 "ai_meta": {
                     "ai_available": False,
-                    "providers_configured": list(self.providers.keys())
+                    "quota_stats": self.get_quota_stats()
                 }
             }
         
@@ -790,7 +893,8 @@ JSON only, no explanation:"""
                 "provider": provider_used,
                 "model": self.providers[provider_used]["model"],
                 "latency_ms": elapsed_ms,
-                "token_usage": usage
+                "token_usage": usage,
+                "quota_stats": self.get_quota_stats()
             }
             if fallback_reason:
                 result["ai_meta"]["fallback_reason"] = fallback_reason
@@ -807,7 +911,7 @@ JSON only, no explanation:"""
                 "ai_meta": {
                     "latency_ms": elapsed_ms,
                     "timeout": True,
-                    "providers_configured": list(self.providers.keys())
+                    "quota_stats": self.get_quota_stats()
                 }
             }
         except Exception as e:
@@ -821,7 +925,7 @@ JSON only, no explanation:"""
                 "ai_meta": {
                     "latency_ms": elapsed_ms,
                     "timeout": False,
-                    "providers_configured": list(self.providers.keys())
+                    "quota_stats": self.get_quota_stats()
                 }
             }
     
