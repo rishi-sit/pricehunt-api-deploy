@@ -184,7 +184,7 @@ class AIService:
         
         self.providers[self.PROVIDER_GROQ] = {
             "api_key": api_key,
-            "model": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+            "model": os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile"),
             "base_url": "https://api.groq.com/openai/v1",
             "type": "openai_compatible",
             "supports_json_mode": True  # llama-3.1 supports JSON mode
@@ -942,19 +942,6 @@ JSON only, no explanation:"""
         strict_mode: bool
     ) -> str:
         """Build the prompt for product filtering"""
-        query_tokens = [t for t in re.findall(r"[a-z0-9]+", query.lower()) if t]
-        primary_hints = {
-            "milk", "rice", "oil", "sugar", "salt", "tea", "coffee", "flour",
-            "atta", "bread", "butter", "ghee", "cheese", "curd", "yogurt",
-            "paneer", "egg", "eggs", "potato", "onion", "tomato", "apple",
-            "banana", "orange", "chicken", "fish", "mutton", "dal", "lentil",
-            "masala", "spice"
-        }
-        primary_product = next((t for t in query_tokens if t in primary_hints), None)
-        if primary_product is None:
-            primary_product = query_tokens[0] if query_tokens else query.lower().strip()
-        optional_terms = [t for t in query_tokens if t != primary_product]
-
         products_json = json.dumps([
             {
                 "id": i,
@@ -965,23 +952,27 @@ JSON only, no explanation:"""
             for i, p in enumerate(products)
         ], separators=(",", ":"))
 
-        strictness = "strict" if strict_mode else "lenient"
+        return f'''You are filtering grocery products for the search query "{query}".
 
-        return (
-            f'Filter grocery products for query "{query}". '
-            f"mode={strictness}. "
-            f"Primary product term: {primary_product}. "
-            f"Optional terms: {optional_terms}. "
-            "If query has multiple words, keep items that match the primary product "
-            "even if optional terms are missing, unless clearly a different product type. "
-            "Return JSON with keys: "
-            "query_understanding{original,interpreted_as,category,primary_product,optional_terms}, "
-            "relevant_items[{id,relevance_score(integer 0-100),relevance_reason}], "
-            "filtered_ids[int]. "
-            "Only use ids from the input list (no new items). "
-            "Prefer keeping items when unsure. "
-            f"Input products: {products_json}"
-        )
+RULES:
+1. KEEP products that ARE the actual "{query}" item (fresh fruit/vegetable/food itself)
+2. FILTER OUT products that are MADE FROM or FLAVORED with "{query}" (chips, shake, juice, flavoured items)
+
+EXAMPLES:
+- Query "banana": KEEP "Fresh Banana", "Organic Banana", "Raw Banana" | FILTER "Banana Chips", "Banana Shake", "Banana Milk"
+- Query "apple": KEEP "Fresh Apple", "Green Apple", "Red Apple" | FILTER "Apple Juice", "Apple Pie", "Apple Cider"
+- Query "milk": KEEP "Toned Milk", "Full Cream Milk", "Cow Milk" | FILTER "Milkshake", "Chocolate Milk", "Milk Powder"
+- Query "potato": KEEP "Fresh Potato", "Baby Potato" | FILTER "Potato Chips", "French Fries", "Aloo Bhujia"
+
+Products to analyze:
+{products_json}
+
+Return JSON with:
+- query_understanding: {{original, interpreted_as, category}}
+- relevant_items: [{{id, relevance_score(0-100), relevance_reason}}] - products that ARE "{query}"
+- filtered_ids: [int] - ids of products to remove
+
+Important: Include ALL fresh/raw "{query}" items in relevant_items. Only filter processed/derivative products.'''
     
     def _build_matching_prompt(self, products: List[Dict]) -> str:
         """Build the prompt for product matching"""
