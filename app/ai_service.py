@@ -333,7 +333,12 @@ class AIService:
             if not orig:
                 continue
             enriched = {**orig}
-            enriched["relevance_score"] = item_dict.get("relevance_score", 50)
+            # Ensure relevance_score is always an integer (AI may return float 0.0-1.0 or int 0-100)
+            raw_score = item_dict.get("relevance_score", 50)
+            if isinstance(raw_score, float) and raw_score <= 1.0:
+                enriched["relevance_score"] = int(raw_score * 100)
+            else:
+                enriched["relevance_score"] = int(raw_score) if raw_score else 50
             enriched["relevance_reason"] = item_dict.get("relevance_reason", "")
             relevant.append(enriched)
             relevant_ids.add(item_id)
@@ -361,7 +366,12 @@ class AIService:
             match = self._match_ai_item(orig, ai_items)
             if match:
                 enriched = {**orig}
-                enriched["relevance_score"] = match.get("relevance_score", 50)
+                # Ensure relevance_score is always an integer
+                raw_score = match.get("relevance_score", 50)
+                if isinstance(raw_score, float) and raw_score <= 1.0:
+                    enriched["relevance_score"] = int(raw_score * 100)
+                else:
+                    enriched["relevance_score"] = int(raw_score) if raw_score else 50
                 enriched["relevance_reason"] = match.get("relevance_reason", "")
                 relevant.append(enriched)
             else:
@@ -756,7 +766,7 @@ JSON only, no explanation:"""
             "even if optional terms are missing, unless clearly a different product type. "
             "Return JSON with keys: "
             "query_understanding{original,interpreted_as,category,primary_product,optional_terms}, "
-            "relevant_items[{id,relevance_score,relevance_reason}], "
+            "relevant_items[{id,relevance_score(integer 0-100),relevance_reason}], "
             "filtered_ids[int]. "
             "Only use ids from the input list (no new items). "
             "Prefer keeping items when unsure. "
@@ -810,7 +820,12 @@ JSON only, no explanation:"""
                     if name in orig_name or orig_name in name or \
                        self._name_similarity(name, orig_name) > 0.8:
                         enriched_product = {**orig}
-                        enriched_product["relevance_score"] = ai_prod.get("relevance_score", 50)
+                        # Ensure relevance_score is always an integer
+                        raw_score = ai_prod.get("relevance_score", 50)
+                        if isinstance(raw_score, float) and raw_score <= 1.0:
+                            enriched_product["relevance_score"] = int(raw_score * 100)
+                        else:
+                            enriched_product["relevance_score"] = int(raw_score) if raw_score else 50
                         enriched_product["relevance_reason"] = ai_prod.get("relevance_reason", "")
                         enriched.append(enriched_product)
                         break
