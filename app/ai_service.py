@@ -953,29 +953,29 @@ JSON only, no explanation:"""
             for i, p in enumerate(products)
         ], separators=(",", ":"))
 
-        return f'''Filter grocery products for search: "{query}"
+        return f'''You are a grocery product filter. User searched for: "{query}"
 
-KEEP these (the actual {query}):
-- Fresh {query}, Raw {query}, Organic {query}
-- Any product that IS the {query} itself (not made from it)
-- Products with "{query}" + quantity/color/type (e.g., "Yellow {query}", "{query} 1kg")
+Your task: Keep products that ARE {query} (the actual food item). Remove products that are MADE FROM {query}.
 
-FILTER these (processed/derivative products):
-- {query} Chips, {query} Shake, {query} Juice
-- {query} Flavoured/Flavored anything
-- Products MADE FROM {query} (not the {query} itself)
+KEEP (these are {query}):
+- "Fresh Banana" ✓ (it IS a banana)
+- "Organic Banana 1kg" ✓ (it IS a banana)  
+- "Yellow Banana 6pc" ✓ (it IS a banana)
+- "Raw Green Banana" ✓ (it IS a banana)
 
-Examples for "banana":
-✅ KEEP: "Fresh Yellow Banana 6pc", "Organic Banana 1kg", "Raw Green Banana", "Robusta Banana"
-❌ FILTER: "Banana Chips", "Banana Shake", "Banana Flavoured Milk"
+REMOVE (these are NOT {query}, they're made from it):
+- "Banana Chips" ✗ (chips made from banana)
+- "Banana Shake" ✗ (shake made from banana)
+- "Banana Flavoured Milk" ✗ (milk flavoured with banana)
 
-Products:
+Products to filter:
 {products_json}
 
-Return JSON:
-{{"query_understanding":{{"original":"{query}","interpreted_as":"fresh {query}","category":"fruits/vegetables"}},"relevant_items":[{{"id":0,"relevance_score":90,"relevance_reason":"fresh {query}"}}],"filtered_ids":[1,2]}}
+Return JSON with:
+- relevant_items: array of {{id, relevance_score(0-100), relevance_reason}} for products to KEEP
+- filtered_ids: array of ids to REMOVE
 
-IMPORTANT: Keep ALL fresh/raw {query} products. When in doubt, KEEP the product.'''
+Rule: If product name contains "{query}" followed by quantity/color (like "1kg", "6pc", "Green", "Yellow", "Fresh", "Organic", "Raw"), it IS {query} - KEEP IT.'''
     
     def _build_matching_prompt(self, products: List[Dict]) -> str:
         """Build the prompt for product matching"""
