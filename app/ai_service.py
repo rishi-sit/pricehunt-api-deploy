@@ -1,6 +1,9 @@
 """
 AI Service for PriceHunt
-Supports multiple AI providers: Mistral AI (default), Google Gemini (fallback)
+Supports multiple AI providers with automatic fallback:
+- Primary: Groq (fastest, 6000 req/day free)
+- Fallback: Mistral AI (1B tokens/month free)
+- Fallback: Google Gemini
 
 Handles all interactions with AI for:
 1. Smart search filtering
@@ -59,91 +62,153 @@ class ProductGroup(BaseModel):
 
 class AIService:
     """
-    Unified AI Service supporting multiple providers.
-    Default: Mistral AI (1 billion tokens/month free)
-    Fallback: Google Gemini
+    Unified AI Service supporting multiple providers with automatic fallback.
+    
+    Priority order:
+    1. Groq (fastest - uses custom LPU hardware, ~18x faster than GPU)
+    2. Mistral AI (1B tokens/month free)
+    3. Google Gemini (fallback)
+    
+    If primary provider fails (quota exceeded, timeout, error), 
+    automatically falls back to the next available provider.
     """
     
     # Provider constants
+    PROVIDER_GROQ = "groq"
     PROVIDER_MISTRAL = "mistral"
     PROVIDER_GEMINI = "gemini"
     
-    def __init__(self, api_key: Optional[str] = None, provider: Optional[str] = None):
-        # Determine provider (mistral by default)
-        self.provider = (provider or os.getenv("AI_PROVIDER", "mistral")).lower()
-        
+    # Rate limit error codes that trigger fallback
+    RATE_LIMIT_CODES = {429, 503}
+    
+    def __init__(self):
         # Configuration
-        self.request_timeout_s = float(os.getenv("AI_TIMEOUT_SEC", "60"))
+        self.request_timeout_s = float(os.getenv("AI_TIMEOUT_SEC", "30"))
         self.max_output_tokens = int(os.getenv("AI_MAX_OUTPUT_TOKENS", "512"))
         self.max_input_products = int(os.getenv("AI_MAX_INPUT_PRODUCTS", "120"))
         self.temperature = float(os.getenv("AI_TEMPERATURE", "0.1"))
         self.top_p = float(os.getenv("AI_TOP_P", "0.95"))
         
-        # Provider-specific setup
-        if self.provider == self.PROVIDER_MISTRAL:
-            self._setup_mistral(api_key)
+        # Setup all available providers
+        self.providers: Dict[str, Dict[str, Any]] = {}
+        self._setup_groq()
+        self._setup_mistral()
+        self._setup_gemini()
+        
+        # Determine primary provider (first available)
+        self.provider = self._get_primary_provider()
+        self._available = self.provider is not None
+        
+        if self._available:
+            print(f"✅ AI Service initialized")
+            print(f"   Primary: {self.provider} ({self.providers[self.provider]['model']})")
+            fallbacks = [p for p in self.providers if p != self.provider]
+            if fallbacks:
+                print(f"   Fallbacks: {', '.join(fallbacks)}")
         else:
-            self._setup_gemini(api_key)
+            print("⚠️ No AI providers configured - AI features disabled")
     
-    def _setup_mistral(self, api_key: Optional[str] = None):
+    def _setup_groq(self):
+        """Setup Groq provider (fastest)"""
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            return
+        
+        self.providers[self.PROVIDER_GROQ] = {
+            "api_key": api_key,
+            "model": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+            "base_url": "https://api.groq.com/openai/v1",
+            "type": "openai_compatible"
+        }
+        print(f"   ✓ Groq configured (model: {self.providers[self.PROVIDER_GROQ]['model']})")
+    
+    def _setup_mistral(self):
         """Setup Mistral AI provider"""
-        self.api_key = api_key or os.getenv("MISTRAL_API_KEY") or os.getenv("AI_API_KEY")
-        self.model_name = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
-        self.base_url = os.getenv("MISTRAL_BASE_URL", "https://api.mistral.ai/v1")
-        
-        if not self.api_key:
-            print("⚠️ MISTRAL_API_KEY not set - AI features will be disabled")
-            self._available = False
+        api_key = os.getenv("MISTRAL_API_KEY")
+        if not api_key:
             return
         
-        self._available = True
-        print(
-            f"✅ Mistral AI initialized (model: {self.model_name}, "
-            f"timeout: {self.request_timeout_s}s, "
-            f"max_tokens: {self.max_output_tokens})"
-        )
+        self.providers[self.PROVIDER_MISTRAL] = {
+            "api_key": api_key,
+            "model": os.getenv("MISTRAL_MODEL", "mistral-small-latest"),
+            "base_url": "https://api.mistral.ai/v1",
+            "type": "openai_compatible"
+        }
+        print(f"   ✓ Mistral configured (model: {self.providers[self.PROVIDER_MISTRAL]['model']})")
     
-    def _setup_gemini(self, api_key: Optional[str] = None):
-        """Setup Google Gemini provider (fallback)"""
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        self.model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-        self.base_url = os.getenv(
-            "GEMINI_HTTP_BASE_URL",
-            "https://generativelanguage.googleapis.com/v1beta"
-        )
-        
-        if not self.api_key:
-            print("⚠️ GEMINI_API_KEY not set - AI features will be disabled")
-            self._available = False
+    def _setup_gemini(self):
+        """Setup Google Gemini provider"""
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if not api_key:
             return
         
-        self._available = True
-        print(
-            f"✅ Gemini AI initialized (model: {self.model_name}, "
-            f"timeout: {self.request_timeout_s}s, "
-            f"max_tokens: {self.max_output_tokens})"
-        )
+        self.providers[self.PROVIDER_GEMINI] = {
+            "api_key": api_key,
+            "model": os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
+            "base_url": "https://generativelanguage.googleapis.com/v1beta",
+            "type": "gemini"
+        }
+        print(f"   ✓ Gemini configured (model: {self.providers[self.PROVIDER_GEMINI]['model']})")
+    
+    def _get_primary_provider(self) -> Optional[str]:
+        """Get primary provider based on priority and availability"""
+        # Priority: Groq > Mistral > Gemini
+        for provider in [self.PROVIDER_GROQ, self.PROVIDER_MISTRAL, self.PROVIDER_GEMINI]:
+            if provider in self.providers:
+                return provider
+        return None
+    
+    def _get_fallback_providers(self, failed_provider: str) -> List[str]:
+        """Get list of fallback providers after a failure"""
+        all_providers = [self.PROVIDER_GROQ, self.PROVIDER_MISTRAL, self.PROVIDER_GEMINI]
+        return [p for p in all_providers if p in self.providers and p != failed_provider]
+    
+    @property
+    def model_name(self) -> str:
+        """Get current provider's model name"""
+        if self.provider and self.provider in self.providers:
+            return self.providers[self.provider]["model"]
+        return "unknown"
     
     def is_available(self) -> bool:
-        """Check if AI is properly configured"""
+        """Check if any AI provider is configured"""
         return self._available
     
-    async def _generate_content(self, prompt: str) -> tuple[str, Dict[str, Optional[int]]]:
-        """Generate content using the configured provider"""
-        if self.provider == self.PROVIDER_MISTRAL:
-            return await self._generate_mistral(prompt)
+    async def _generate_content(
+        self, 
+        prompt: str, 
+        provider: Optional[str] = None
+    ) -> tuple[str, Dict[str, Optional[int]], str]:
+        """
+        Generate content using specified provider or primary.
+        Returns: (text, usage_info, provider_used)
+        """
+        provider = provider or self.provider
+        if not provider or provider not in self.providers:
+            raise ValueError("No AI provider available")
+        
+        config = self.providers[provider]
+        
+        if config["type"] == "openai_compatible":
+            text, usage = await self._generate_openai_compatible(prompt, config)
         else:
-            return await self._generate_gemini(prompt)
+            text, usage = await self._generate_gemini(prompt, config)
+        
+        return text, usage, provider
     
-    async def _generate_mistral(self, prompt: str) -> tuple[str, Dict[str, Optional[int]]]:
-        """Generate content using Mistral AI API (OpenAI-compatible)"""
-        url = f"{self.base_url}/chat/completions"
+    async def _generate_openai_compatible(
+        self, 
+        prompt: str, 
+        config: Dict[str, Any]
+    ) -> tuple[str, Dict[str, Optional[int]]]:
+        """Generate content using OpenAI-compatible API (Groq, Mistral)"""
+        url = f"{config['base_url']}/chat/completions"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {config['api_key']}",
             "Content-Type": "application/json"
         }
         payload = {
-            "model": self.model_name,
+            "model": config["model"],
             "messages": [
                 {
                     "role": "system",
@@ -187,12 +252,16 @@ class AIService:
         
         return text, usage_info
     
-    async def _generate_gemini(self, prompt: str) -> tuple[str, Dict[str, Optional[int]]]:
+    async def _generate_gemini(
+        self, 
+        prompt: str, 
+        config: Dict[str, Any]
+    ) -> tuple[str, Dict[str, Optional[int]]]:
         """Generate content using Google Gemini API"""
-        model_name = self.model_name.strip()
+        model_name = config["model"].strip()
         model_path = model_name if model_name.startswith("models/") else f"models/{model_name}"
-        url = f"{self.base_url}/{model_path}:generateContent"
-        params = {"key": self.api_key}
+        url = f"{config['base_url']}/{model_path}:generateContent"
+        params = {"key": config["api_key"]}
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -230,6 +299,47 @@ class AIService:
         }
         
         return text, usage_info
+    
+    async def _generate_with_fallback(
+        self, 
+        prompt: str
+    ) -> tuple[str, Dict[str, Optional[int]], str, Optional[str]]:
+        """
+        Generate content with automatic fallback on failure.
+        Returns: (text, usage_info, provider_used, fallback_reason)
+        """
+        providers_to_try = [self.provider] + self._get_fallback_providers(self.provider)
+        last_error = None
+        fallback_reason = None
+        
+        for i, provider in enumerate(providers_to_try):
+            try:
+                text, usage, used_provider = await self._generate_content(prompt, provider)
+                if i > 0:
+                    fallback_reason = f"Fallback from {providers_to_try[0]}: {last_error}"
+                return text, usage, used_provider, fallback_reason
+                
+            except httpx.HTTPStatusError as e:
+                last_error = f"HTTP {e.response.status_code}"
+                if e.response.status_code in self.RATE_LIMIT_CODES:
+                    print(f"⚠️ {provider} rate limited (HTTP {e.response.status_code}), trying fallback...")
+                    continue
+                # For other HTTP errors, still try fallback
+                print(f"⚠️ {provider} error: {last_error}, trying fallback...")
+                continue
+                
+            except asyncio.TimeoutError:
+                last_error = "timeout"
+                print(f"⚠️ {provider} timeout, trying fallback...")
+                continue
+                
+            except Exception as e:
+                last_error = str(e)
+                print(f"⚠️ {provider} error: {last_error}, trying fallback...")
+                continue
+        
+        # All providers failed
+        raise Exception(f"All AI providers failed. Last error: {last_error}")
     
     def _parse_json_text(self, text: str) -> Dict[str, Any]:
         """Parse JSON from AI response text"""
@@ -297,6 +407,17 @@ class AIService:
                 best_item = item
         return best_item if best_score >= 0.6 else None
     
+    def _normalize_relevance_score(self, raw_score: Any) -> int:
+        """Normalize relevance score to integer 0-100"""
+        if raw_score is None:
+            return 50
+        if isinstance(raw_score, float) and raw_score <= 1.0:
+            return int(raw_score * 100)
+        try:
+            return int(raw_score)
+        except (ValueError, TypeError):
+            return 50
+    
     def _apply_ai_filter(
         self,
         ai_relevant: List[Any],
@@ -333,12 +454,7 @@ class AIService:
             if not orig:
                 continue
             enriched = {**orig}
-            # Ensure relevance_score is always an integer (AI may return float 0.0-1.0 or int 0-100)
-            raw_score = item_dict.get("relevance_score", 50)
-            if isinstance(raw_score, float) and raw_score <= 1.0:
-                enriched["relevance_score"] = int(raw_score * 100)
-            else:
-                enriched["relevance_score"] = int(raw_score) if raw_score else 50
+            enriched["relevance_score"] = self._normalize_relevance_score(item_dict.get("relevance_score", 50))
             enriched["relevance_reason"] = item_dict.get("relevance_reason", "")
             relevant.append(enriched)
             relevant_ids.add(item_id)
@@ -366,12 +482,7 @@ class AIService:
             match = self._match_ai_item(orig, ai_items)
             if match:
                 enriched = {**orig}
-                # Ensure relevance_score is always an integer
-                raw_score = match.get("relevance_score", 50)
-                if isinstance(raw_score, float) and raw_score <= 1.0:
-                    enriched["relevance_score"] = int(raw_score * 100)
-                else:
-                    enriched["relevance_score"] = int(raw_score) if raw_score else 50
+                enriched["relevance_score"] = self._normalize_relevance_score(match.get("relevance_score", 50))
                 enriched["relevance_reason"] = match.get("relevance_reason", "")
                 relevant.append(enriched)
             else:
@@ -399,15 +510,14 @@ class AIService:
             return {
                 "ok": False,
                 "error": "ai_unavailable",
-                "provider": self.provider,
-                "model": self.model_name
+                "providers_configured": list(self.providers.keys())
             }
+        
         prompt = 'Return JSON: {"ok": true}'
-        text = ""
         start_time = time.monotonic()
         try:
-            text, usage = await asyncio.wait_for(
-                self._generate_content(prompt),
+            text, usage, provider_used, fallback_reason = await asyncio.wait_for(
+                self._generate_with_fallback(prompt),
                 timeout=self.request_timeout_s
             )
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
@@ -416,34 +526,28 @@ class AIService:
                 parsed = json.loads(text)
             except json.JSONDecodeError:
                 parsed = None
-            return {
+            
+            result = {
                 "ok": True,
                 "latency_ms": elapsed_ms,
-                "provider": self.provider,
-                "model": self.model_name,
+                "provider": provider_used,
+                "model": self.providers[provider_used]["model"],
                 "token_usage": usage,
                 "parsed_ok": parsed,
-                "response_preview": text[:200]
+                "response_preview": text[:200],
+                "providers_configured": list(self.providers.keys())
             }
+            if fallback_reason:
+                result["fallback_reason"] = fallback_reason
+            return result
+            
         except asyncio.TimeoutError:
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
             return {
                 "ok": False,
                 "timeout": True,
                 "latency_ms": elapsed_ms,
-                "provider": self.provider,
-                "model": self.model_name
-            }
-        except httpx.HTTPStatusError as e:
-            elapsed_ms = int((time.monotonic() - start_time) * 1000)
-            return {
-                "ok": False,
-                "timeout": False,
-                "latency_ms": elapsed_ms,
-                "provider": self.provider,
-                "model": self.model_name,
-                "status_code": e.response.status_code,
-                "error": e.response.text[:200]
+                "providers_configured": list(self.providers.keys())
             }
         except Exception as e:
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
@@ -451,9 +555,8 @@ class AIService:
                 "ok": False,
                 "timeout": False,
                 "latency_ms": elapsed_ms,
-                "provider": self.provider,
-                "model": self.model_name,
-                "error": str(e)
+                "error": str(e),
+                "providers_configured": list(self.providers.keys())
             }
     
     async def filter_relevant_products(
@@ -464,6 +567,7 @@ class AIService:
     ) -> Dict[str, Any]:
         """
         Use AI to filter products based on search query relevance.
+        Automatically falls back to next provider if primary fails.
         """
         if not self.is_available():
             return {
@@ -473,8 +577,7 @@ class AIService:
                 "ai_powered": False,
                 "ai_meta": {
                     "ai_available": False,
-                    "provider": self.provider,
-                    "model": self.model_name
+                    "providers_configured": list(self.providers.keys())
                 }
             }
         
@@ -484,8 +587,8 @@ class AIService:
         text = ""
         start_time = time.monotonic()
         try:
-            text, usage = await asyncio.wait_for(
-                self._generate_content(prompt),
+            text, usage, provider_used, fallback_reason = await asyncio.wait_for(
+                self._generate_with_fallback(prompt),
                 timeout=self.request_timeout_s
             )
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
@@ -508,17 +611,19 @@ class AIService:
             result["filtered_out"] = filtered
             result["ai_powered"] = True
             result["ai_meta"] = {
-                "provider": self.provider,
-                "model": self.model_name,
+                "provider": provider_used,
+                "model": self.providers[provider_used]["model"],
                 "latency_ms": elapsed_ms,
                 "token_usage": usage
             }
+            if fallback_reason:
+                result["ai_meta"]["fallback_reason"] = fallback_reason
             
             return result
             
         except asyncio.TimeoutError:
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
-            print(f"❌ {self.provider} filter error: AI timeout")
+            print(f"❌ AI filter error: All providers timed out")
             return {
                 "relevant_products": products,
                 "filtered_out": [],
@@ -526,15 +631,14 @@ class AIService:
                 "ai_powered": False,
                 "error": "AI timeout",
                 "ai_meta": {
-                    "provider": self.provider,
-                    "model": self.model_name,
                     "latency_ms": elapsed_ms,
-                    "timeout": True
+                    "timeout": True,
+                    "providers_configured": list(self.providers.keys())
                 }
             }
         except Exception as e:
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
-            print(f"❌ {self.provider} filter error: {e}")
+            print(f"❌ AI filter error: {e}")
             return {
                 "relevant_products": products,
                 "filtered_out": [],
@@ -542,11 +646,10 @@ class AIService:
                 "ai_powered": False,
                 "error": str(e),
                 "ai_meta": {
-                    "provider": self.provider,
-                    "model": self.model_name,
                     "latency_ms": elapsed_ms,
                     "timeout": False,
-                    "response_preview": (text or "")[:200]
+                    "response_preview": (text or "")[:200],
+                    "providers_configured": list(self.providers.keys())
                 }
             }
     
@@ -564,8 +667,7 @@ class AIService:
                 "ai_powered": False,
                 "ai_meta": {
                     "ai_available": False,
-                    "provider": self.provider,
-                    "model": self.model_name
+                    "providers_configured": list(self.providers.keys())
                 }
             }
         
@@ -575,8 +677,8 @@ class AIService:
         text = ""
         start_time = time.monotonic()
         try:
-            text, usage = await asyncio.wait_for(
-                self._generate_content(prompt),
+            text, usage, provider_used, fallback_reason = await asyncio.wait_for(
+                self._generate_with_fallback(prompt),
                 timeout=self.request_timeout_s
             )
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
@@ -584,11 +686,13 @@ class AIService:
             result = self._parse_json_text(text)
             result["ai_powered"] = True
             result["ai_meta"] = {
-                "provider": self.provider,
-                "model": self.model_name,
+                "provider": provider_used,
+                "model": self.providers[provider_used]["model"],
                 "latency_ms": elapsed_ms,
                 "token_usage": usage
             }
+            if fallback_reason:
+                result["ai_meta"]["fallback_reason"] = fallback_reason
             
             # Enrich groups with full product data
             for group in result.get("product_groups", []):
@@ -608,33 +712,31 @@ class AIService:
             
         except asyncio.TimeoutError:
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
-            print(f"❌ {self.provider} matching error: AI timeout")
+            print(f"❌ AI matching error: All providers timed out")
             return {
                 "product_groups": [],
                 "unmatched_products": products,
                 "ai_powered": False,
                 "error": "AI timeout",
                 "ai_meta": {
-                    "provider": self.provider,
-                    "model": self.model_name,
                     "latency_ms": elapsed_ms,
-                    "timeout": True
+                    "timeout": True,
+                    "providers_configured": list(self.providers.keys())
                 }
             }
         except Exception as e:
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
-            print(f"❌ {self.provider} matching error: {e}")
+            print(f"❌ AI matching error: {e}")
             return {
                 "product_groups": [],
                 "unmatched_products": products,
                 "ai_powered": False,
                 "error": str(e),
                 "ai_meta": {
-                    "provider": self.provider,
-                    "model": self.model_name,
                     "latency_ms": elapsed_ms,
                     "timeout": False,
-                    "response_preview": (text or "")[:200]
+                    "response_preview": (text or "")[:200],
+                    "providers_configured": list(self.providers.keys())
                 }
             }
     
@@ -649,8 +751,7 @@ class AIService:
                 "ai_powered": False,
                 "ai_meta": {
                     "ai_available": False,
-                    "provider": self.provider,
-                    "model": self.model_name
+                    "providers_configured": list(self.providers.keys())
                 }
             }
         
@@ -677,8 +778,8 @@ JSON only, no explanation:"""
         
         start_time = time.monotonic()
         try:
-            text, usage = await asyncio.wait_for(
-                self._generate_content(prompt),
+            text, usage, provider_used, fallback_reason = await asyncio.wait_for(
+                self._generate_with_fallback(prompt),
                 timeout=self.request_timeout_s
             )
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
@@ -686,42 +787,41 @@ JSON only, no explanation:"""
             result = self._parse_json_text(text)
             result["ai_powered"] = True
             result["ai_meta"] = {
-                "provider": self.provider,
-                "model": self.model_name,
+                "provider": provider_used,
+                "model": self.providers[provider_used]["model"],
                 "latency_ms": elapsed_ms,
                 "token_usage": usage
             }
+            if fallback_reason:
+                result["ai_meta"]["fallback_reason"] = fallback_reason
             return result
 
         except asyncio.TimeoutError:
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
-            print(f"❌ {self.provider} query understanding error: AI timeout")
+            print(f"❌ AI query understanding error: All providers timed out")
             return {
                 "original_query": query,
                 "product_type": query,
                 "ai_powered": False,
                 "error": "AI timeout",
                 "ai_meta": {
-                    "provider": self.provider,
-                    "model": self.model_name,
                     "latency_ms": elapsed_ms,
-                    "timeout": True
+                    "timeout": True,
+                    "providers_configured": list(self.providers.keys())
                 }
             }
         except Exception as e:
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
-            print(f"❌ {self.provider} query understanding error: {e}")
+            print(f"❌ AI query understanding error: {e}")
             return {
                 "original_query": query,
                 "product_type": query,
                 "ai_powered": False,
                 "error": str(e),
                 "ai_meta": {
-                    "provider": self.provider,
-                    "model": self.model_name,
                     "latency_ms": elapsed_ms,
                     "timeout": False,
-                    "response_preview": (text or "")[:200]
+                    "providers_configured": list(self.providers.keys())
                 }
             }
     
@@ -820,12 +920,9 @@ JSON only, no explanation:"""
                     if name in orig_name or orig_name in name or \
                        self._name_similarity(name, orig_name) > 0.8:
                         enriched_product = {**orig}
-                        # Ensure relevance_score is always an integer
-                        raw_score = ai_prod.get("relevance_score", 50)
-                        if isinstance(raw_score, float) and raw_score <= 1.0:
-                            enriched_product["relevance_score"] = int(raw_score * 100)
-                        else:
-                            enriched_product["relevance_score"] = int(raw_score) if raw_score else 50
+                        enriched_product["relevance_score"] = self._normalize_relevance_score(
+                            ai_prod.get("relevance_score", 50)
+                        )
                         enriched_product["relevance_reason"] = ai_prod.get("relevance_reason", "")
                         enriched.append(enriched_product)
                         break

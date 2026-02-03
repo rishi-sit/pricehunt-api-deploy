@@ -1,6 +1,9 @@
 """
 AI-Powered Scraper Service for PriceHunt
-Uses AI (Mistral or Gemini) to extract products from raw HTML when standard extraction fails.
+Uses AI to extract products from raw HTML when standard extraction fails.
+
+Priority: Groq (fastest) > Mistral > Gemini
+Automatically falls back to next provider on quota/rate limit errors.
 
 This is the FALLBACK for client-side scraping failures.
 When Android app's WebView scraping fails, it sends the raw HTML to this endpoint
@@ -20,74 +23,109 @@ class AIScraper:
     Uses AI's understanding of HTML structure to extract products
     even when traditional scraping fails.
     
-    Supports: Mistral AI (default), Google Gemini (fallback)
+    Supports: Groq (primary), Mistral AI (fallback), Google Gemini (fallback)
     """
     
+    PROVIDER_GROQ = "groq"
     PROVIDER_MISTRAL = "mistral"
     PROVIDER_GEMINI = "gemini"
     
-    def __init__(self, api_key: Optional[str] = None, provider: Optional[str] = None):
-        self.provider = (provider or os.getenv("AI_PROVIDER", "mistral")).lower()
+    RATE_LIMIT_CODES = {429, 503}
+    
+    def __init__(self):
         self.temperature = 0.1
         self.top_p = 0.95
         self.max_output_tokens = 8192
         self.request_timeout_s = 90.0
         
-        if self.provider == self.PROVIDER_MISTRAL:
-            self._setup_mistral(api_key)
+        # Setup all available providers
+        self.providers: Dict[str, Dict[str, Any]] = {}
+        self._setup_groq()
+        self._setup_mistral()
+        self._setup_gemini()
+        
+        # Determine primary provider
+        self.provider = self._get_primary_provider()
+        self._available = self.provider is not None
+        
+        if self._available:
+            print(f"✅ AI Scraper initialized (primary: {self.provider})")
         else:
-            self._setup_gemini(api_key)
+            print("⚠️ No AI providers configured - AI scraper disabled")
     
-    def _setup_mistral(self, api_key: Optional[str] = None):
+    def _setup_groq(self):
+        """Setup Groq provider (fastest)"""
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            return
+        self.providers[self.PROVIDER_GROQ] = {
+            "api_key": api_key,
+            "model": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+            "base_url": "https://api.groq.com/openai/v1",
+            "type": "openai_compatible"
+        }
+    
+    def _setup_mistral(self):
         """Setup Mistral AI provider"""
-        self.api_key = api_key or os.getenv("MISTRAL_API_KEY") or os.getenv("AI_API_KEY")
-        self.model_name = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
-        self.base_url = os.getenv("MISTRAL_BASE_URL", "https://api.mistral.ai/v1")
-        
-        if not self.api_key:
-            print("⚠️ MISTRAL_API_KEY not set - AI scraper will be disabled")
-            self._available = False
+        api_key = os.getenv("MISTRAL_API_KEY")
+        if not api_key:
             return
-        
-        self._available = True
-        print(f"✅ AI Scraper initialized (Mistral: {self.model_name})")
+        self.providers[self.PROVIDER_MISTRAL] = {
+            "api_key": api_key,
+            "model": os.getenv("MISTRAL_MODEL", "mistral-small-latest"),
+            "base_url": "https://api.mistral.ai/v1",
+            "type": "openai_compatible"
+        }
     
-    def _setup_gemini(self, api_key: Optional[str] = None):
+    def _setup_gemini(self):
         """Setup Google Gemini provider"""
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        self.model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-        self.base_url = os.getenv(
-            "GEMINI_HTTP_BASE_URL",
-            "https://generativelanguage.googleapis.com/v1beta"
-        )
-        
-        if not self.api_key:
-            print("⚠️ GEMINI_API_KEY not set - AI scraper will be disabled")
-            self._available = False
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if not api_key:
             return
-        
-        self._available = True
-        print(f"✅ AI Scraper initialized (Gemini: {self.model_name})")
+        self.providers[self.PROVIDER_GEMINI] = {
+            "api_key": api_key,
+            "model": os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
+            "base_url": "https://generativelanguage.googleapis.com/v1beta",
+            "type": "gemini"
+        }
+    
+    def _get_primary_provider(self) -> Optional[str]:
+        """Get primary provider based on priority"""
+        for provider in [self.PROVIDER_GROQ, self.PROVIDER_MISTRAL, self.PROVIDER_GEMINI]:
+            if provider in self.providers:
+                return provider
+        return None
+    
+    def _get_fallback_providers(self, failed_provider: str) -> List[str]:
+        """Get list of fallback providers"""
+        all_providers = [self.PROVIDER_GROQ, self.PROVIDER_MISTRAL, self.PROVIDER_GEMINI]
+        return [p for p in all_providers if p in self.providers and p != failed_provider]
     
     def is_available(self) -> bool:
         return self._available
     
-    async def _generate_content(self, prompt: str) -> str:
-        """Generate content using the configured provider"""
-        if self.provider == self.PROVIDER_MISTRAL:
-            return await self._generate_mistral(prompt)
+    async def _generate_content(self, prompt: str, provider: Optional[str] = None) -> str:
+        """Generate content using specified provider"""
+        provider = provider or self.provider
+        if not provider or provider not in self.providers:
+            raise ValueError("No AI provider available")
+        
+        config = self.providers[provider]
+        
+        if config["type"] == "openai_compatible":
+            return await self._generate_openai_compatible(prompt, config)
         else:
-            return await self._generate_gemini(prompt)
+            return await self._generate_gemini(prompt, config)
     
-    async def _generate_mistral(self, prompt: str) -> str:
-        """Generate content using Mistral AI API"""
-        url = f"{self.base_url}/chat/completions"
+    async def _generate_openai_compatible(self, prompt: str, config: Dict[str, Any]) -> str:
+        """Generate content using OpenAI-compatible API (Groq, Mistral)"""
+        url = f"{config['base_url']}/chat/completions"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {config['api_key']}",
             "Content-Type": "application/json"
         }
         payload = {
-            "model": self.model_name,
+            "model": config["model"],
             "messages": [
                 {
                     "role": "system",
@@ -115,11 +153,12 @@ class AIScraper:
             return choices[0].get("message", {}).get("content", "")
         return ""
     
-    async def _generate_gemini(self, prompt: str) -> str:
+    async def _generate_gemini(self, prompt: str, config: Dict[str, Any]) -> str:
         """Generate content using Google Gemini API"""
-        model_path = self.model_name if self.model_name.startswith("models/") else f"models/{self.model_name}"
-        url = f"{self.base_url}/{model_path}:generateContent"
-        params = {"key": self.api_key}
+        model_name = config["model"]
+        model_path = model_name if model_name.startswith("models/") else f"models/{model_name}"
+        url = f"{config['base_url']}/{model_path}:generateContent"
+        params = {"key": config["api_key"]}
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -143,6 +182,29 @@ class AIScraper:
                 return parts[0].get("text", "")
         return ""
     
+    async def _generate_with_fallback(self, prompt: str) -> tuple[str, str]:
+        """Generate content with automatic fallback. Returns (text, provider_used)"""
+        providers_to_try = [self.provider] + self._get_fallback_providers(self.provider)
+        last_error = None
+        
+        for provider in providers_to_try:
+            try:
+                text = await self._generate_content(prompt, provider)
+                return text, provider
+            except httpx.HTTPStatusError as e:
+                last_error = f"HTTP {e.response.status_code}"
+                if e.response.status_code in self.RATE_LIMIT_CODES:
+                    print(f"⚠️ AI Scraper: {provider} rate limited, trying fallback...")
+                    continue
+                print(f"⚠️ AI Scraper: {provider} error: {last_error}, trying fallback...")
+                continue
+            except Exception as e:
+                last_error = str(e)
+                print(f"⚠️ AI Scraper: {provider} error: {last_error}, trying fallback...")
+                continue
+        
+        raise Exception(f"All AI providers failed. Last error: {last_error}")
+    
     async def extract_products_from_html(
         self,
         html: str,
@@ -151,7 +213,8 @@ class AIScraper:
         base_url: str
     ) -> Dict[str, Any]:
         """
-        Use Gemini to extract products from raw HTML.
+        Use AI to extract products from raw HTML.
+        Automatically falls back to next provider on failure.
         
         Args:
             html: Raw HTML content from the page
@@ -162,7 +225,7 @@ class AIScraper:
         Returns:
             {
                 "products": [...],
-                "extraction_method": "gemini_ai",
+                "extraction_method": "ai",
                 "confidence": 0.0-1.0
             }
         """
@@ -170,7 +233,7 @@ class AIScraper:
             return {
                 "products": [],
                 "extraction_method": "none",
-                "error": "Gemini API not available",
+                "error": "AI API not available",
                 "ai_powered": False
             }
         
@@ -190,7 +253,7 @@ class AIScraper:
         )
         
         try:
-            response_text = await self._generate_content(prompt)
+            response_text, provider_used = await self._generate_with_fallback(prompt)
             
             # Parse JSON from response
             cleaned = response_text.strip()
@@ -214,7 +277,9 @@ class AIScraper:
             
             return {
                 "products": products,
-                "extraction_method": "gemini_ai",
+                "extraction_method": "ai",
+                "provider": provider_used,
+                "model": self.providers[provider_used]["model"],
                 "confidence": result.get("confidence", 0.7),
                 "ai_powered": True,
                 "products_found": len(products)
