@@ -953,27 +953,29 @@ JSON only, no explanation:"""
             for i, p in enumerate(products)
         ], separators=(",", ":"))
 
-        return f'''You are filtering grocery products for the search query "{query}".
+        return f'''Filter grocery products for search: "{query}"
 
-RULES:
-1. KEEP products that ARE the actual "{query}" item (fresh fruit/vegetable/food itself)
-2. FILTER OUT products that are MADE FROM or FLAVORED with "{query}" (chips, shake, juice, flavoured items)
+KEEP these (the actual {query}):
+- Fresh {query}, Raw {query}, Organic {query}
+- Any product that IS the {query} itself (not made from it)
+- Products with "{query}" + quantity/color/type (e.g., "Yellow {query}", "{query} 1kg")
 
-EXAMPLES:
-- Query "banana": KEEP "Fresh Banana", "Organic Banana", "Raw Banana" | FILTER "Banana Chips", "Banana Shake", "Banana Milk"
-- Query "apple": KEEP "Fresh Apple", "Green Apple", "Red Apple" | FILTER "Apple Juice", "Apple Pie", "Apple Cider"
-- Query "milk": KEEP "Toned Milk", "Full Cream Milk", "Cow Milk" | FILTER "Milkshake", "Chocolate Milk", "Milk Powder"
-- Query "potato": KEEP "Fresh Potato", "Baby Potato" | FILTER "Potato Chips", "French Fries", "Aloo Bhujia"
+FILTER these (processed/derivative products):
+- {query} Chips, {query} Shake, {query} Juice
+- {query} Flavoured/Flavored anything
+- Products MADE FROM {query} (not the {query} itself)
 
-Products to analyze:
+Examples for "banana":
+✅ KEEP: "Fresh Yellow Banana 6pc", "Organic Banana 1kg", "Raw Green Banana", "Robusta Banana"
+❌ FILTER: "Banana Chips", "Banana Shake", "Banana Flavoured Milk"
+
+Products:
 {products_json}
 
-Return JSON with:
-- query_understanding: {{original, interpreted_as, category}}
-- relevant_items: [{{id, relevance_score(0-100), relevance_reason}}] - products that ARE "{query}"
-- filtered_ids: [int] - ids of products to remove
+Return JSON:
+{{"query_understanding":{{"original":"{query}","interpreted_as":"fresh {query}","category":"fruits/vegetables"}},"relevant_items":[{{"id":0,"relevance_score":90,"relevance_reason":"fresh {query}"}}],"filtered_ids":[1,2]}}
 
-Important: Include ALL fresh/raw "{query}" items in relevant_items. Only filter processed/derivative products.'''
+IMPORTANT: Keep ALL fresh/raw {query} products. When in doubt, KEEP the product.'''
     
     def _build_matching_prompt(self, products: List[Dict]) -> str:
         """Build the prompt for product matching"""
