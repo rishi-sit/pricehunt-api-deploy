@@ -956,21 +956,28 @@ JSON only, no explanation:"""
             for i, p in enumerate(products)
         ], separators=(",", ":"))
 
-        return f'''Filter products for "{query}". BE VERY LENIENT - when unsure, KEEP the product.
+        return f'''Task: Filter grocery products for search "{query}".
 
-ONLY remove products that are clearly processed/derivative forms:
-- Chips, Shake, Juice, Flavoured/Flavored items, Powder, Sauce
+Input: {products_json}
 
-KEEP everything else, especially:
-- Any product with "{query}" + brand name (Amul, Mother Dairy, India Gate, etc.)
-- Any product with "{query}" + descriptor (Fresh, Toned, Organic, Raw, Green, Yellow, Basmati, etc.)
-- Any product with "{query}" + quantity (1kg, 500ml, 6pc, 1L, etc.)
+Rules:
+1. KEEP: Products that ARE the actual {query} (fresh produce, packaged {query})
+2. REMOVE: Products made FROM {query} (chips, shake, juice, flavoured items, powder)
 
-Products: {products_json}
+Examples of what to KEEP for "banana":
+- "Fresh Yellow Banana 6pc" → KEEP (it's actual bananas)
+- "Organic Banana 1kg" → KEEP (it's actual bananas)
+- "Raw Green Banana 500g" → KEEP (it's actual bananas)
+- "Robusta Banana" → KEEP (it's actual bananas)
 
-Return JSON: {{"relevant_items":[{{"id":0,"relevance_score":90,"relevance_reason":"..."}}],"filtered_ids":[5,6]}}
+Examples of what to REMOVE for "banana":
+- "Banana Chips" → REMOVE (chips made from banana)
+- "Banana Shake" → REMOVE (beverage)
+- "Banana Flavoured Milk" → REMOVE (flavoured product)
 
-IMPORTANT: Only add to filtered_ids if the product is clearly Chips/Shake/Juice/Flavoured/Powder. Keep ALL other products.'''
+Output format: {{"relevant_items":[{{"id":0,"relevance_score":95,"relevance_reason":"fresh banana"}}],"filtered_ids":[1,3]}}
+
+CRITICAL: "Fresh", "Yellow", "6pc", "1kg" are descriptors of actual {query} - KEEP these products!'''
     
     def _build_matching_prompt(self, products: List[Dict]) -> str:
         """Build the prompt for product matching"""
