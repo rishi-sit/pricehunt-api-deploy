@@ -219,9 +219,8 @@ class AIService:
     
     def _get_available_providers(self) -> List[str]:
         """Get list of providers that are configured AND not quota-exhausted"""
-        # Priority order: Gemini > Mistral > Groq
-        # Gemini has better accuracy for this task
-        priority = [self.PROVIDER_GEMINI, self.PROVIDER_MISTRAL, self.PROVIDER_GROQ]
+        # Priority order: Groq (testing) > Gemini > Mistral
+        priority = [self.PROVIDER_GROQ, self.PROVIDER_GEMINI, self.PROVIDER_MISTRAL]
         available = []
         for p in priority:
             if p in self.providers and self.quota.is_available(p):
