@@ -169,6 +169,96 @@ async def ai_accuracy(provider: str = "groq", model: Optional[str] = None):
                 "Nandini Toned Milk 500ml",
                 "Fresh Cow Milk 1L"
             ]
+        },
+        {
+            "name": "bread_basic",
+            "query": "bread",
+            "products": [
+                {"name": "Britannia Bread 400g", "price": 40, "platform": "Blinkit"},
+                {"name": "Whole Wheat Bread 400g", "price": 45, "platform": "BigBasket"},
+                {"name": "Bread Knife 8 inch", "price": 120, "platform": "Amazon"},
+                {"name": "Toaster 2 Slice", "price": 999, "platform": "Amazon"},
+                {"name": "Wheat Flour 1kg", "price": 55, "platform": "Zepto"}
+            ],
+            "expected_relevant": [
+                "Britannia Bread 400g",
+                "Whole Wheat Bread 400g"
+            ]
+        },
+        {
+            "name": "eggs_basic",
+            "query": "eggs",
+            "products": [
+                {"name": "Farm Fresh Eggs 12pcs", "price": 90, "platform": "BigBasket"},
+                {"name": "Eggs 6pcs", "price": 48, "platform": "Zepto"},
+                {"name": "Eggless Mayo 250g", "price": 60, "platform": "Blinkit"},
+                {"name": "Eggless Cake Mix 500g", "price": 80, "platform": "Amazon"},
+                {"name": "Chicken Breast 500g", "price": 220, "platform": "Instamart"}
+            ],
+            "expected_relevant": [
+                "Farm Fresh Eggs 12pcs",
+                "Eggs 6pcs"
+            ]
+        },
+        {
+            "name": "rice_5kg",
+            "query": "rice 5kg",
+            "products": [
+                {"name": "India Gate Basmati Rice 5kg", "price": 450, "platform": "Amazon"},
+                {"name": "Sona Masoori Rice 5kg", "price": 399, "platform": "BigBasket"},
+                {"name": "Rice Flour 1kg", "price": 60, "platform": "Blinkit"},
+                {"name": "Brown Rice 1kg", "price": 120, "platform": "Zepto"},
+                {"name": "Poha 1kg", "price": 70, "platform": "Instamart"}
+            ],
+            "expected_relevant": [
+                "India Gate Basmati Rice 5kg",
+                "Sona Masoori Rice 5kg"
+            ]
+        },
+        {
+            "name": "oil_1l",
+            "query": "sunflower oil 1L",
+            "products": [
+                {"name": "Fortune Sunflower Oil 1L", "price": 170, "platform": "Amazon"},
+                {"name": "Saffola Sunflower Oil 1L", "price": 180, "platform": "BigBasket"},
+                {"name": "Mustard Oil 1L", "price": 140, "platform": "JioMart"},
+                {"name": "Sunflower Oil 5L", "price": 780, "platform": "Amazon"},
+                {"name": "Olive Oil 500ml", "price": 350, "platform": "Blinkit"}
+            ],
+            "expected_relevant": [
+                "Fortune Sunflower Oil 1L",
+                "Saffola Sunflower Oil 1L"
+            ]
+        },
+        {
+            "name": "apple_basic",
+            "query": "apple",
+            "products": [
+                {"name": "Fresh Apple 1kg", "price": 120, "platform": "BigBasket"},
+                {"name": "Red Apple 4pcs", "price": 80, "platform": "Zepto"},
+                {"name": "Apple Juice 1L", "price": 110, "platform": "Blinkit"},
+                {"name": "Apple Cider Vinegar 500ml", "price": 180, "platform": "Amazon"},
+                {"name": "Pineapple 1kg", "price": 90, "platform": "Instamart"}
+            ],
+            "expected_relevant": [
+                "Fresh Apple 1kg",
+                "Red Apple 4pcs"
+            ]
+        },
+        {
+            "name": "banana_fresh",
+            "query": "banana",
+            "products": [
+                {"name": "Banana Robusta 1kg", "price": 60, "platform": "Zepto"},
+                {"name": "Yellaki Banana 12 pcs", "price": 70, "platform": "BigBasket"},
+                {"name": "Banana Chips 150g", "price": 45, "platform": "Amazon"},
+                {"name": "Banana Cake Slice", "price": 55, "platform": "Blinkit"},
+                {"name": "Plantain Chips 200g", "price": 65, "platform": "Instamart"}
+            ],
+            "expected_relevant": [
+                "Banana Robusta 1kg",
+                "Yellaki Banana 12 pcs"
+            ]
         }
     ]
 
