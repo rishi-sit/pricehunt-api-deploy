@@ -165,6 +165,11 @@ class AIService:
         
         # Reference to global quota tracker
         self.quota = _quota_tracker
+        # Track Gemini model-level exhaustion separately (per model)
+        self._gemini_exhausted_models: Dict[str, str] = {}
+        self._gemini_unavailable_models: Dict[str, str] = {}
+        self._gemini_request_counts: Dict[str, int] = {}
+        self._gemini_last_reset_date: str = self._get_today()
         
         # Check availability
         self._available = len(self.providers) > 0
@@ -172,7 +177,12 @@ class AIService:
         if self._available:
             print(f"✅ AI Service initialized")
             for name, config in self.providers.items():
-                print(f"   ✓ {name}: {config['model']}")
+                if name == self.PROVIDER_GEMINI and config.get("models"):
+                    models = config.get("models") or [config.get("model")]
+                    extra = f" (+{len(models) - 1} fallbacks)" if len(models) > 1 else ""
+                    print(f"   ✓ {name}: {models[0]}{extra}")
+                else:
+                    print(f"   ✓ {name}: {config['model']}")
         else:
             print("⚠️ No AI providers configured - AI features disabled")
     
@@ -209,23 +219,75 @@ class AIService:
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not api_key:
             return
-        
+        env_priority = os.getenv("GEMINI_MODEL_PRIORITY", "").strip()
+        if env_priority:
+            models = [m.strip() for m in env_priority.split(",") if m.strip()]
+        else:
+            primary = os.getenv("GEMINI_MODEL", "gemma-3-27b-it").strip()
+            fallback_env = os.getenv("GEMINI_MODEL_FALLBACKS", "").strip()
+            if fallback_env:
+                fallbacks = [m.strip() for m in fallback_env.split(",") if m.strip()]
+            else:
+                fallbacks = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+            models = [primary] + [m for m in fallbacks if m and m != primary]
+
         self.providers[self.PROVIDER_GEMINI] = {
             "api_key": api_key,
-            "model": os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
+            "model": models[0] if models else "gemma-3-27b-it",
+            "models": models,
             "base_url": "https://generativelanguage.googleapis.com/v1beta",
             "type": "gemini"
         }
     
     def _get_available_providers(self) -> List[str]:
         """Get list of providers that are configured AND not quota-exhausted"""
-        # Priority order: Groq (testing) > Gemini > Mistral
-        priority = [self.PROVIDER_GROQ, self.PROVIDER_GEMINI, self.PROVIDER_MISTRAL]
+        # Priority order can be overridden via AI_PROVIDER_PRIORITY (e.g. "gemini,groq,mistral").
+        default_priority = [self.PROVIDER_GROQ, self.PROVIDER_GEMINI, self.PROVIDER_MISTRAL]
+        env_priority = os.getenv("AI_PROVIDER_PRIORITY", "").strip()
+        if env_priority:
+            requested = [p.strip().lower() for p in env_priority.split(",") if p.strip()]
+            priority: List[str] = []
+            for p in requested:
+                if p in default_priority and p not in priority:
+                    priority.append(p)
+            for p in default_priority:
+                if p not in priority:
+                    priority.append(p)
+        else:
+            priority = default_priority
+
         available = []
         for p in priority:
             if p in self.providers and self.quota.is_available(p):
                 available.append(p)
         return available
+
+    def _get_today(self) -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def _check_gemini_daily_reset(self):
+        today = self._get_today()
+        if today != self._gemini_last_reset_date:
+            self._gemini_exhausted_models.clear()
+            self._gemini_unavailable_models.clear()
+            self._gemini_request_counts.clear()
+            self._gemini_last_reset_date = today
+
+    def _is_gemini_model_available(self, model: str) -> bool:
+        self._check_gemini_daily_reset()
+        return model not in self._gemini_exhausted_models and model not in self._gemini_unavailable_models
+
+    def _mark_gemini_model_exhausted(self, model: str):
+        self._check_gemini_daily_reset()
+        self._gemini_exhausted_models[model] = self._get_today()
+
+    def _mark_gemini_model_unavailable(self, model: str):
+        self._check_gemini_daily_reset()
+        self._gemini_unavailable_models[model] = self._get_today()
+
+    def _record_gemini_model_request(self, model: str):
+        self._check_gemini_daily_reset()
+        self._gemini_request_counts[model] = self._gemini_request_counts.get(model, 0) + 1
     
     def _get_primary_provider(self) -> Optional[str]:
         """Get the best available provider right now"""
@@ -254,16 +316,20 @@ class AIService:
         stats = self.quota.get_stats()
         stats["current_provider"] = self.provider
         stats["configured_providers"] = list(self.providers.keys())
+        if self._gemini_request_counts or self._gemini_exhausted_models or self._gemini_unavailable_models:
+            stats["gemini_model_request_counts"] = dict(self._gemini_request_counts)
+            stats["gemini_models_exhausted"] = list(self._gemini_exhausted_models.keys())
+            stats["gemini_models_unavailable"] = list(self._gemini_unavailable_models.keys())
         return stats
     
     async def _generate_content(
         self, 
         prompt: str, 
         provider: Optional[str] = None
-    ) -> tuple[str, Dict[str, Optional[int]], str]:
+    ) -> tuple[str, Dict[str, Optional[int]], str, str]:
         """
         Generate content using specified provider.
-        Returns: (text, usage_info, provider_used)
+        Returns: (text, usage_info, provider_used, model_used)
         """
         provider = provider or self.provider
         if not provider or provider not in self.providers:
@@ -273,13 +339,46 @@ class AIService:
         
         if config["type"] == "openai_compatible":
             text, usage = await self._generate_openai_compatible(prompt, config)
+            model_used = config["model"]
         else:
-            text, usage = await self._generate_gemini(prompt, config)
+            text, usage, model_used = await self._generate_gemini(prompt, config)
         
         # Record successful request
         self.quota.record_request(provider)
         
-        return text, usage, provider
+        return text, usage, provider, model_used
+
+    async def _generate_content_override(
+        self,
+        prompt: str,
+        provider: Optional[str],
+        model_override: Optional[str]
+    ) -> tuple[str, Dict[str, Optional[int]], str, str]:
+        """
+        Generate content using specified provider and model override.
+        Returns: (text, usage_info, provider_used, model_used)
+        """
+        provider = provider or self.provider
+        if not provider or provider not in self.providers:
+            raise ValueError("No AI provider available")
+
+        config = dict(self.providers[provider])
+        model_override = (model_override or "").strip()
+        if model_override:
+            config["model"] = model_override
+            if config.get("type") == "gemini":
+                config["models"] = [model_override]
+
+        if config["type"] == "openai_compatible":
+            text, usage = await self._generate_openai_compatible(prompt, config)
+            model_used = config["model"]
+        else:
+            text, usage, model_used = await self._generate_gemini(prompt, config)
+
+        # Record successful request
+        self.quota.record_request(provider)
+
+        return text, usage, provider, model_used
     
     async def _generate_openai_compatible(
         self, 
@@ -348,54 +447,88 @@ class AIService:
         self, 
         prompt: str, 
         config: Dict[str, Any]
-    ) -> tuple[str, Dict[str, Optional[int]]]:
+    ) -> tuple[str, Dict[str, Optional[int]], str]:
         """Generate content using Google Gemini API"""
-        model_name = config["model"].strip()
-        model_path = model_name if model_name.startswith("models/") else f"models/{model_name}"
-        url = f"{config['base_url']}/{model_path}:generateContent"
-        params = {"key": config["api_key"]}
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": self.temperature,
-                "topP": self.top_p,
-                "maxOutputTokens": self.max_output_tokens,
-                "responseMimeType": "application/json"
+        models = config.get("models") or [config.get("model")]
+        models_to_try = [m for m in models if m and self._is_gemini_model_available(m)]
+        if not models_to_try:
+            raise Exception("gemini_models_exhausted")
+
+        last_error = None
+        for model_name in models_to_try:
+            model_name = model_name.strip()
+            model_path = model_name if model_name.startswith("models/") else f"models/{model_name}"
+            url = f"{config['base_url']}/{model_path}:generateContent"
+            params = {"key": config["api_key"]}
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": self.temperature,
+                    "topP": self.top_p,
+                    "maxOutputTokens": self.max_output_tokens,
+                    "responseMimeType": "application/json"
+                }
             }
-        }
-        
-        timeout = httpx.Timeout(
-            timeout=self.request_timeout_s,
-            connect=min(self.request_timeout_s, 10.0)
-        )
-        
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, params=params, json=payload)
-            response.raise_for_status()
-            data = response.json()
-        
-        # Extract text
-        candidates = data.get("candidates", [])
-        text = ""
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if parts:
-                text = parts[0].get("text", "")
-        
-        # Extract usage
-        usage = data.get("usageMetadata", {})
-        usage_info = {
-            "prompt_token_count": usage.get("promptTokenCount"),
-            "candidates_token_count": usage.get("candidatesTokenCount"),
-            "total_token_count": usage.get("totalTokenCount")
-        }
-        
-        return text, usage_info
+            
+            timeout = httpx.Timeout(
+                timeout=self.request_timeout_s,
+                connect=min(self.request_timeout_s, 10.0)
+            )
+            
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(url, params=params, json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                error_text = ""
+                try:
+                    error_payload = e.response.json()
+                    error_text = str(error_payload.get("error", {}).get("message") or "")
+                except Exception:
+                    error_text = (e.response.text or "").strip()
+                error_text = re.sub(r"\s+", " ", error_text)[:200] if error_text else ""
+                last_error = f"HTTP {status}: {error_text}" if error_text else f"HTTP {status}"
+
+                if status == 429:
+                    self._mark_gemini_model_exhausted(model_name)
+                    continue
+                if status in {403, 404} or (status == 400 and "model" in error_text.lower()):
+                    self._mark_gemini_model_unavailable(model_name)
+                    continue
+                continue
+            except asyncio.TimeoutError:
+                last_error = "timeout"
+                continue
+            except Exception as e:
+                last_error = str(e)
+                continue
+            
+            # Extract text
+            candidates = data.get("candidates", [])
+            text = ""
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    text = parts[0].get("text", "")
+            
+            # Extract usage
+            usage = data.get("usageMetadata", {})
+            usage_info = {
+                "prompt_token_count": usage.get("promptTokenCount"),
+                "candidates_token_count": usage.get("candidatesTokenCount"),
+                "total_token_count": usage.get("totalTokenCount")
+            }
+            self._record_gemini_model_request(model_name)
+            return text, usage_info, model_name
+
+        raise Exception(f"gemini_models_failed: {last_error or 'unknown_error'}")
     
     async def _generate_with_fallback(
         self, 
         prompt: str
-    ) -> tuple[str, Dict[str, Optional[int]], str, Optional[str]]:
+    ) -> tuple[str, Dict[str, Optional[int]], str, str, Optional[str]]:
         """
         Generate content with automatic fallback on quota exhaustion.
         
@@ -404,7 +537,7 @@ class AIService:
         2. Tries the next available provider
         3. Tomorrow, will try the exhausted provider again
         
-        Returns: (text, usage_info, provider_used, fallback_reason)
+        Returns: (text, usage_info, provider_used, model_used, fallback_reason)
         """
         providers_to_try = self._get_available_providers()
         
@@ -417,13 +550,22 @@ class AIService:
         
         for i, provider in enumerate(providers_to_try):
             try:
-                text, usage, used_provider = await self._generate_content(prompt, provider)
+                text, usage, used_provider, model_used = await self._generate_content(prompt, provider)
                 if i > 0:
                     fallback_reason = f"Switched from {original_provider}: {last_error}"
-                return text, usage, used_provider, fallback_reason
+                return text, usage, used_provider, model_used, fallback_reason
                 
             except httpx.HTTPStatusError as e:
-                last_error = f"HTTP {e.response.status_code}"
+                error_text = ""
+                try:
+                    error_text = (e.response.text or "").strip()
+                except Exception:
+                    error_text = ""
+                if error_text:
+                    error_text = re.sub(r"\s+", " ", error_text)[:200]
+                    last_error = f"HTTP {e.response.status_code}: {error_text}"
+                else:
+                    last_error = f"HTTP {e.response.status_code}"
                 
                 if e.response.status_code == 429:
                     # Quota exceeded - mark as exhausted for today
@@ -444,6 +586,8 @@ class AIService:
                 
             except Exception as e:
                 last_error = str(e)
+                if provider == self.PROVIDER_GEMINI and "gemini_models" in last_error:
+                    self.quota.mark_exhausted(provider)
                 print(f"⚠️ {provider} error: {last_error}, trying fallback...")
                 continue
         
@@ -625,7 +769,7 @@ class AIService:
         prompt = 'Return JSON: {"ok": true}'
         start_time = time.monotonic()
         try:
-            text, usage, provider_used, fallback_reason = await asyncio.wait_for(
+            text, usage, provider_used, model_used, fallback_reason = await asyncio.wait_for(
                 self._generate_with_fallback(prompt),
                 timeout=self.request_timeout_s
             )
@@ -640,7 +784,7 @@ class AIService:
                 "ok": True,
                 "latency_ms": elapsed_ms,
                 "provider": provider_used,
-                "model": self.providers[provider_used]["model"],
+                "model": model_used,
                 "token_usage": usage,
                 "parsed_ok": parsed,
                 "response_preview": text[:200],
@@ -667,6 +811,149 @@ class AIService:
                 "latency_ms": elapsed_ms,
                 "error": str(e),
                 "quota_stats": self.get_quota_stats()
+            }
+
+    async def ping_provider(self, provider: str) -> Dict[str, Any]:
+        """Connectivity test for a specific provider (no fallback)."""
+        provider = (provider or "").strip().lower()
+        if provider not in self.providers:
+            return {
+                "ok": False,
+                "error": "provider_not_configured",
+                "provider": provider,
+                "providers_configured": list(self.providers.keys()),
+                "quota_stats": self.get_quota_stats()
+            }
+
+        prompt = 'Return JSON: {"ok": true}'
+        start_time = time.monotonic()
+        try:
+            text, usage, provider_used, model_used = await asyncio.wait_for(
+                self._generate_content(prompt, provider),
+                timeout=self.request_timeout_s
+            )
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            parsed = None
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+
+            return {
+                "ok": True,
+                "latency_ms": elapsed_ms,
+                "provider": provider_used,
+                "model": model_used,
+                "token_usage": usage,
+                "parsed_ok": parsed,
+                "response_preview": text[:200],
+                "providers_configured": list(self.providers.keys()),
+                "quota_stats": self.get_quota_stats()
+            }
+        except httpx.HTTPStatusError as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            error_text = ""
+            try:
+                error_text = (e.response.text or "").strip()
+            except Exception:
+                error_text = ""
+            if error_text:
+                error_text = re.sub(r"\s+", " ", error_text)[:500]
+            return {
+                "ok": False,
+                "latency_ms": elapsed_ms,
+                "provider": provider,
+                "model": self.providers[provider]["model"],
+                "status_code": e.response.status_code,
+                "error": error_text or "http_error",
+                "quota_stats": self.get_quota_stats()
+            }
+        except asyncio.TimeoutError:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            return {
+                "ok": False,
+                "timeout": True,
+                "latency_ms": elapsed_ms,
+                "provider": provider,
+                "model": self.providers[provider]["model"],
+                "quota_stats": self.get_quota_stats()
+            }
+        except Exception as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            return {
+                "ok": False,
+                "timeout": False,
+                "latency_ms": elapsed_ms,
+                "provider": provider,
+                "model": self.providers[provider]["model"],
+                "error": str(e),
+                "quota_stats": self.get_quota_stats()
+            }
+
+    async def list_models(self) -> Dict[str, Any]:
+        """List available Gemini models for this API key."""
+        if self.PROVIDER_GEMINI not in self.providers:
+            return {
+                "ok": False,
+                "error": "gemini_not_configured",
+                "quota_stats": self.get_quota_stats()
+            }
+
+        config = self.providers[self.PROVIDER_GEMINI]
+        url = f"{config['base_url']}/models"
+        params = {"key": config["api_key"]}
+        timeout = httpx.Timeout(
+            timeout=self.request_timeout_s,
+            connect=min(self.request_timeout_s, 10.0)
+        )
+        start_time = time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            models = data.get("models", [])
+            simplified = [
+                {
+                    "name": m.get("name"),
+                    "displayName": m.get("displayName"),
+                    "supportedGenerationMethods": m.get("supportedGenerationMethods"),
+                    "inputTokenLimit": m.get("inputTokenLimit"),
+                    "outputTokenLimit": m.get("outputTokenLimit")
+                }
+                for m in models
+            ]
+            return {
+                "ok": True,
+                "latency_ms": elapsed_ms,
+                "model_count": len(models),
+                "models": simplified
+            }
+        except asyncio.TimeoutError:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            return {
+                "ok": False,
+                "timeout": True,
+                "latency_ms": elapsed_ms
+            }
+        except httpx.HTTPStatusError as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            error_text = e.response.text[:500] if e.response else "No error body"
+            return {
+                "ok": False,
+                "timeout": False,
+                "latency_ms": elapsed_ms,
+                "status_code": e.response.status_code,
+                "error": error_text
+            }
+        except Exception as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            return {
+                "ok": False,
+                "timeout": False,
+                "latency_ms": elapsed_ms,
+                "error": str(e)
             }
     
     async def filter_relevant_products(
@@ -697,7 +984,7 @@ class AIService:
         text = ""
         start_time = time.monotonic()
         try:
-            text, usage, provider_used, fallback_reason = await asyncio.wait_for(
+            text, usage, provider_used, model_used, fallback_reason = await asyncio.wait_for(
                 self._generate_with_fallback(prompt),
                 timeout=self.request_timeout_s
             )
@@ -722,7 +1009,7 @@ class AIService:
             result["ai_powered"] = True
             result["ai_meta"] = {
                 "provider": provider_used,
-                "model": self.providers[provider_used]["model"],
+                "model": model_used,
                 "latency_ms": elapsed_ms,
                 "token_usage": usage,
                 "quota_stats": self.get_quota_stats()
@@ -763,6 +1050,146 @@ class AIService:
                     "quota_stats": self.get_quota_stats()
                 }
             }
+
+    async def filter_relevant_products_with_provider(
+        self,
+        query: str,
+        products: List[Dict[str, Any]],
+        strict_mode: bool = True,
+        provider: Optional[str] = None,
+        model: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Filter products using a specific provider (no fallback)."""
+        if not self.is_available():
+            return {
+                "relevant_products": products,
+                "filtered_out": [],
+                "query_understanding": {"original": query, "interpreted_as": query},
+                "ai_powered": False,
+                "ai_meta": {
+                    "ai_available": False,
+                    "quota_stats": self.get_quota_stats()
+                }
+            }
+
+        provider = (provider or "").strip().lower()
+        model = (model or "").strip() or None
+        if provider and provider not in self.providers:
+            return {
+                "relevant_products": products,
+                "filtered_out": [],
+                "query_understanding": {"original": query, "interpreted_as": query},
+                "ai_powered": False,
+                "error": "provider_not_configured",
+                "ai_meta": {
+                    "provider": provider,
+                    "model": model,
+                    "providers_configured": list(self.providers.keys()),
+                    "quota_stats": self.get_quota_stats()
+                }
+            }
+
+        products_subset = products[:self.max_input_products]
+        prompt = self._build_filter_prompt(query, products_subset, strict_mode)
+
+        text = ""
+        start_time = time.monotonic()
+        model_label = model or self.providers.get(provider or self.provider, {}).get("model")
+        try:
+            if model:
+                text, usage, provider_used, model_used = await asyncio.wait_for(
+                    self._generate_content_override(prompt, provider or None, model),
+                    timeout=self.request_timeout_s
+                )
+            else:
+                text, usage, provider_used, model_used = await asyncio.wait_for(
+                    self._generate_content(prompt, provider or None),
+                    timeout=self.request_timeout_s
+                )
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+
+            try:
+                result = self._parse_json_text(text)
+                ai_relevant = result.get("relevant_items") or result.get("relevant_products") or result.get("relevant_names") or []
+                ai_filtered = result.get("filtered_ids") or result.get("filtered_out") or result.get("filtered_names") or []
+            except Exception:
+                ai_relevant = self._extract_relevant_names(text)
+                ai_filtered = []
+                result = {
+                    "query_understanding": {"original": query, "interpreted_as": query},
+                    "relevant_names": ai_relevant,
+                    "filtered_names": ai_filtered
+                }
+
+            relevant, filtered = self._apply_ai_filter(ai_relevant, ai_filtered, products)
+            result["relevant_products"] = relevant
+            result["filtered_out"] = filtered
+            result["ai_powered"] = True
+            result["ai_meta"] = {
+                "provider": provider_used,
+                "model": model_used,
+                "latency_ms": elapsed_ms,
+                "token_usage": usage,
+                "quota_stats": self.get_quota_stats()
+            }
+            return result
+
+        except httpx.HTTPStatusError as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            error_text = ""
+            try:
+                error_text = (e.response.text or "").strip()
+            except Exception:
+                error_text = ""
+            if error_text:
+                error_text = re.sub(r"\s+", " ", error_text)[:200]
+            return {
+                "relevant_products": products,
+                "filtered_out": [],
+                "query_understanding": {"original": query, "interpreted_as": query},
+                "ai_powered": False,
+                "error": error_text or f"HTTP {e.response.status_code}",
+                "ai_meta": {
+                    "provider": provider or self.provider,
+                    "model": model_label,
+                    "latency_ms": elapsed_ms,
+                    "status_code": e.response.status_code,
+                    "quota_stats": self.get_quota_stats()
+                }
+            }
+        except asyncio.TimeoutError:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            return {
+                "relevant_products": products,
+                "filtered_out": [],
+                "query_understanding": {"original": query, "interpreted_as": query},
+                "ai_powered": False,
+                "error": "AI timeout",
+                "ai_meta": {
+                    "provider": provider or self.provider,
+                    "model": model_label,
+                    "latency_ms": elapsed_ms,
+                    "timeout": True,
+                    "quota_stats": self.get_quota_stats()
+                }
+            }
+        except Exception as e:
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            return {
+                "relevant_products": products,
+                "filtered_out": [],
+                "query_understanding": {"original": query, "interpreted_as": query},
+                "ai_powered": False,
+                "error": str(e),
+                "ai_meta": {
+                    "provider": provider or self.provider,
+                    "model": model_label,
+                    "latency_ms": elapsed_ms,
+                    "timeout": False,
+                    "response_preview": (text or "")[:200],
+                    "quota_stats": self.get_quota_stats()
+                }
+            }
     
     async def match_products_across_platforms(
         self, 
@@ -788,7 +1215,7 @@ class AIService:
         text = ""
         start_time = time.monotonic()
         try:
-            text, usage, provider_used, fallback_reason = await asyncio.wait_for(
+            text, usage, provider_used, model_used, fallback_reason = await asyncio.wait_for(
                 self._generate_with_fallback(prompt),
                 timeout=self.request_timeout_s
             )
@@ -798,7 +1225,7 @@ class AIService:
             result["ai_powered"] = True
             result["ai_meta"] = {
                 "provider": provider_used,
-                "model": self.providers[provider_used]["model"],
+                "model": model_used,
                 "latency_ms": elapsed_ms,
                 "token_usage": usage,
                 "quota_stats": self.get_quota_stats()
@@ -890,7 +1317,7 @@ JSON only, no explanation:"""
         
         start_time = time.monotonic()
         try:
-            text, usage, provider_used, fallback_reason = await asyncio.wait_for(
+            text, usage, provider_used, model_used, fallback_reason = await asyncio.wait_for(
                 self._generate_with_fallback(prompt),
                 timeout=self.request_timeout_s
             )
@@ -900,7 +1327,7 @@ JSON only, no explanation:"""
             result["ai_powered"] = True
             result["ai_meta"] = {
                 "provider": provider_used,
-                "model": self.providers[provider_used]["model"],
+                "model": model_used,
                 "latency_ms": elapsed_ms,
                 "token_usage": usage,
                 "quota_stats": self.get_quota_stats()

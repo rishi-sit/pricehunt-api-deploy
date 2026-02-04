@@ -194,6 +194,7 @@ async def root():
             "/api/match-products": "🆕 Match similar products across platforms",
             "/api/understand-query": "🆕 Understand search query intent",
             "/api/platforms": "Get supported platforms",
+            "/api/groq-ping": "Groq connectivity test (no fallback)",
             "/docs": "API documentation"
         }
     }
@@ -476,6 +477,12 @@ async def gemini_ping():
 async def gemini_models():
     """List available Gemini models for this API key."""
     return await gemini.list_models()
+
+
+@app.get("/api/groq-ping")
+async def groq_ping():
+    """Quick connectivity test for Groq (no fallback)."""
+    return await gemini.ping_provider("groq")
 
 
 if __name__ == "__main__":

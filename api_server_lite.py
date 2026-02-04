@@ -103,6 +103,7 @@ async def root():
             "understand_query": "GET /api/understand-query",
             "ai_extract": "POST /api/ai-extract (NEW - fallback scraping)",
             "ai_extract_multi": "POST /api/ai-extract-multi (NEW - multi-platform)",
+            "groq_ping": "GET /api/groq-ping",
             "health": "GET /api/health"
         }
     }
@@ -130,6 +131,118 @@ async def gemini_ping():
 async def gemini_models():
     """List available Gemini models for this API key."""
     return await gemini.list_models()
+
+
+@app.get("/api/ai-accuracy")
+async def ai_accuracy(provider: str = "groq", model: Optional[str] = None):
+    """
+    Simple accuracy check for AI filtering on a small built-in dataset.
+    Intended for quick sanity checks, not a full benchmark.
+    """
+    tests = [
+        {
+            "name": "milk_basic",
+            "query": "milk",
+            "products": [
+                {"name": "Amul Toned Milk 500ml", "price": 28, "platform": "Zepto"},
+                {"name": "Milkmaid Condensed 400g", "price": 99, "platform": "BigBasket"},
+                {"name": "Cadbury Dairy Milk Chocolate", "price": 50, "platform": "Amazon"},
+                {"name": "Mother Dairy Full Cream Milk 1L", "price": 68, "platform": "JioMart"},
+                {"name": "Nestle Milkshake Strawberry", "price": 35, "platform": "Blinkit"}
+            ],
+            "expected_relevant": [
+                "Amul Toned Milk 500ml",
+                "Mother Dairy Full Cream Milk 1L"
+            ]
+        },
+        {
+            "name": "milk_derived",
+            "query": "milk",
+            "products": [
+                {"name": "Nandini Toned Milk 500ml", "price": 27, "platform": "Zepto"},
+                {"name": "Nandini Curd 400g", "price": 35, "platform": "Blinkit"},
+                {"name": "Milk Powder 1kg", "price": 380, "platform": "Amazon"},
+                {"name": "Fresh Cow Milk 1L", "price": 60, "platform": "BigBasket"},
+                {"name": "Chocolate Milk Drink 200ml", "price": 25, "platform": "Instamart"}
+            ],
+            "expected_relevant": [
+                "Nandini Toned Milk 500ml",
+                "Fresh Cow Milk 1L"
+            ]
+        }
+    ]
+
+    results = []
+    total_items = 0
+    total_tp = total_fp = total_fn = total_tn = 0
+
+    for test in tests:
+        ai_result = await gemini.filter_relevant_products_with_provider(
+            query=test["query"],
+            products=test["products"],
+            strict_mode=True,
+            provider=provider,
+            model=model
+        )
+        predicted = {p.get("name", "").strip().lower() for p in ai_result.get("relevant_products", [])}
+        expected = {name.strip().lower() for name in test["expected_relevant"]}
+        all_items = {p.get("name", "").strip().lower() for p in test["products"]}
+
+        tp = len(predicted & expected)
+        fp = len(predicted - expected)
+        fn = len(expected - predicted)
+        tn = len((all_items - predicted) & (all_items - expected))
+
+        total = len(all_items)
+        total_items += total
+        total_tp += tp
+        total_fp += fp
+        total_fn += fn
+        total_tn += tn
+
+        accuracy = (tp + tn) / total if total else 0.0
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+
+        results.append({
+            "name": test["name"],
+            "provider": (ai_result.get("ai_meta") or {}).get("provider"),
+            "model": (ai_result.get("ai_meta") or {}).get("model"),
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "tp": tp,
+            "fp": fp,
+            "fn": fn,
+            "tn": tn,
+            "predicted_relevant": sorted(predicted)
+        })
+
+    overall_accuracy = (total_tp + total_tn) / total_items if total_items else 0.0
+    overall_precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) else 0.0
+    overall_recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) else 0.0
+
+    return {
+        "provider_requested": provider,
+        "model_requested": model,
+        "tests": results,
+        "overall": {
+            "accuracy": overall_accuracy,
+            "precision": overall_precision,
+            "recall": overall_recall,
+            "tp": total_tp,
+            "fp": total_fp,
+            "fn": total_fn,
+            "tn": total_tn,
+            "total_items": total_items
+        }
+    }
+
+
+@app.get("/api/groq-ping")
+async def groq_ping():
+    """Quick connectivity test for Groq (no fallback)."""
+    return await gemini.ping_provider("groq")
 
 
 @app.post("/api/smart-search")
