@@ -112,7 +112,8 @@ class SmartSearch:
         query_normalized = query.lower().strip()
         query_words = query_normalized.split()
         primary_keyword = query_words[0] if query_words else query_normalized
-        effective_strict_mode = strict_mode and len(query_words) <= 1
+        # Multi-word queries are MORE specific, so keep strict mode on
+        effective_strict_mode = strict_mode
         
         # Check if this is a product type search (don't filter derivatives)
         is_product_type_search = primary_keyword in self.PRODUCT_TYPES

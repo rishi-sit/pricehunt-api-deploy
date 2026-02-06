@@ -1382,15 +1382,33 @@ JSON only, no explanation:"""
             for i, p in enumerate(products)
         ], separators=(",", ":"))
 
+        query_words = query.lower().strip().split()
+        is_multi_word = len(query_words) > 1
+        threshold = 60 if is_multi_word else 50
+
+        multi_word_note = ""
+        if is_multi_word:
+            multi_word_note = f"""
+IMPORTANT: The user searched for "{query}" (multi-word query).
+This is a SPECIFIC search — ALL query words must be present or closely matched in the product.
+Products that match only SOME words should score LOW.
+Example: if query is "milk double toned", then:
+- "Amul Double Toned Milk 500ml" = 95 (matches all words)
+- "Mother Dairy Double Toned Milk 1L" = 95 (matches all words)
+- "Amul Toned Milk 500ml" = 35 (missing "double" — wrong variant)
+- "Amul Full Cream Milk 1L" = 25 (wrong variant entirely)
+- "Cadbury Dairy Milk Chocolate" = 0 (not milk at all)
+"""
+
         return f'''Score each product's relevance to "{query}" from 0-100.
 
 Products: {products_json}
-
+{multi_word_note}
 Scoring guide for "{query}":
-- 90-100: The product IS {query} itself (e.g., "Fresh Banana", "Toned Milk", "Basmati Rice")
-- 70-89: Related {query} variant (e.g., "Raw Banana", "Full Cream Milk")  
-- 40-69: {query} derivative that user might want (e.g., "Rice Flour")
-- 0-39: NOT {query}, just contains the word (e.g., "Banana Chips", "Milkshake", "Dairy Milk chocolate")
+- 90-100: The product IS exactly "{query}" (matches all query words)
+- 70-89: Very close variant (e.g., same product, slightly different description)
+- 40-69: Related but different variant (e.g., different type/flavor)
+- 0-39: NOT what user wants, just contains some words from query
 
 Examples for "banana":
 - "Fresh Yellow Banana 6pc" = 95 (IS banana)
@@ -1398,10 +1416,10 @@ Examples for "banana":
 - "Banana Chips" = 20 (processed snack)
 - "Banana Shake" = 15 (beverage)
 
-Return JSON: {{"relevant_items":[{{"id":0,"relevance_score":95,"relevance_reason":"actual banana"}}],"filtered_ids":[3,4]}}
+Return JSON: {{"relevant_items":[{{"id":0,"relevance_score":95,"relevance_reason":"exact match"}}],"filtered_ids":[3,4]}}
 
-Include in relevant_items: ALL products with score >= 50
-Include in filtered_ids: ALL products with score < 50'''
+Include in relevant_items: ALL products with score >= {threshold}
+Include in filtered_ids: ALL products with score < {threshold}'''
     
     def _build_matching_prompt(self, products: List[Dict]) -> str:
         """Build the prompt for product matching"""
