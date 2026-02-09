@@ -707,10 +707,190 @@ async def smart_extract_and_filter(request: MultiPlatformExtractRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============== SERVER-SIDE FULL SEARCH ==============
+
+@app.get("/api/full-search")
+async def full_search(
+    q: str = "",
+    pincode: str = "560001",
+    strict: bool = True
+):
+    """
+    FULL SERVER-SIDE SEARCH: Scrape + AI filter + match in one call.
+    
+    This is the RECOMMENDED endpoint for the Android app.
+    The server handles ALL scraping (via Playwright/HTTP) so the app
+    doesn't need any scraping logic. Benefits:
+    - Scraping can be fixed server-side without app updates
+    - Playwright browser is more reliable than Android WebView
+    - AI filtering + matching happens in the same request
+    
+    Usage: GET /api/full-search?q=banana&pincode=560001
+    """
+    import asyncio as _asyncio
+
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+
+    query = q.strip()
+    start_time = time.monotonic()
+
+    # Import scrapers lazily (only when this endpoint is called)
+    try:
+        from app.scrapers.amazon import AmazonScraper
+        from app.scrapers.amazon_fresh import AmazonFreshScraper
+        from app.scrapers.flipkart import FlipkartScraper
+        from app.scrapers.bigbasket import BigBasketScraper
+        from app.scrapers.zepto import ZeptoScraper
+        from app.scrapers.blinkit import BlinkitScraper
+        from app.scrapers.instamart import InstamartScraper
+        from app.scrapers.jiomart import JioMartScraper
+
+        scrapers = {
+            "Amazon": AmazonScraper(pincode),
+            "Amazon Fresh": AmazonFreshScraper(pincode),
+            "Flipkart": FlipkartScraper(pincode),
+            "BigBasket": BigBasketScraper(pincode),
+            "Zepto": ZeptoScraper(pincode),
+            "Blinkit": BlinkitScraper(pincode),
+            "Instamart": InstamartScraper(pincode),
+            "JioMart": JioMartScraper(pincode),
+        }
+    except ImportError as e:
+        # Playwright not available on this deployment — return error
+        raise HTTPException(
+            status_code=503,
+            detail=f"Server-side scraping not available: {e}. Use POST /api/smart-search instead."
+        )
+
+    # Scrape all platforms in parallel with per-platform timeout
+    async def scrape_one(name, scraper):
+        try:
+            products = await _asyncio.wait_for(scraper.safe_search(query), timeout=25.0)
+            print(f"  {name}: {len(products)} products")
+            return name, [
+                {
+                    "name": p.name,
+                    "price": p.price,
+                    "original_price": p.original_price,
+                    "discount": p.discount,
+                    "platform": p.platform,
+                    "url": p.url,
+                    "image_url": p.image_url,
+                    "rating": p.rating,
+                    "delivery_time": p.delivery_time or "",
+                    "available": p.available,
+                }
+                for p in products
+            ]
+        except Exception as e:
+            print(f"  {name}: Error - {e}")
+            return name, []
+
+    print(f"🔍 FULL SEARCH: '{query}' (pincode={pincode})")
+    tasks = [scrape_one(name, scraper) for name, scraper in scrapers.items()]
+    platform_results_list = await _asyncio.gather(*tasks)
+
+    scrape_ms = int((time.monotonic() - start_time) * 1000)
+
+    # Build platform results dict
+    platform_results = {}
+    all_products = []
+    for name, products in platform_results_list:
+        if products:
+            platform_results[name] = products
+            all_products.extend(products)
+
+    print(f"📊 Scraped {len(all_products)} products from {len(platform_results)} platforms in {scrape_ms}ms")
+
+    # If no products scraped, return empty
+    if not all_products:
+        return {
+            "query": query,
+            "pincode": pincode,
+            "ai_powered": False,
+            "results": [],
+            "platform_results": {},
+            "best_deal": None,
+            "filtered_out": [],
+            "product_groups": [],
+            "stats": {
+                "total_scraped": 0,
+                "platforms_with_results": 0,
+                "total_relevant": 0,
+                "total_filtered": 0,
+            },
+            "timing_ms": {"scrape": scrape_ms, "total": scrape_ms},
+        }
+
+    # AI filter + match using existing smart search
+    filter_start = time.monotonic()
+    try:
+        result = await smart_search.search(
+            query=query,
+            products=all_products,
+            strict_mode=strict,
+            use_ai=True,
+        )
+        filter_ms = int((time.monotonic() - filter_start) * 1000)
+
+        # Group results by platform for display
+        results_by_platform = {}
+        for p in result.products:
+            plat = p.get("platform", "Unknown")
+            results_by_platform.setdefault(plat, []).append(p)
+
+        total_ms = int((time.monotonic() - start_time) * 1000)
+
+        return {
+            "query": query,
+            "pincode": pincode,
+            "ai_powered": result.ai_powered,
+            "ai_meta": result.ai_meta,
+            "results": result.products,
+            "platform_results": results_by_platform,
+            "best_deal": result.best_deal,
+            "filtered_out": result.filtered_out,
+            "product_groups": [],
+            "stats": {
+                "total_scraped": len(all_products),
+                "platforms_with_results": len(platform_results),
+                "total_relevant": result.total_found,
+                "total_filtered": result.total_filtered,
+            },
+            "timing_ms": {
+                "scrape": scrape_ms,
+                "ai_filter": filter_ms,
+                "total": total_ms,
+            },
+        }
+    except Exception as e:
+        total_ms = int((time.monotonic() - start_time) * 1000)
+        print(f"❌ AI filtering failed: {e}, returning raw results")
+        return {
+            "query": query,
+            "pincode": pincode,
+            "ai_powered": False,
+            "results": all_products,
+            "platform_results": platform_results,
+            "best_deal": min(all_products, key=lambda x: x["price"]) if all_products else None,
+            "filtered_out": [],
+            "product_groups": [],
+            "stats": {
+                "total_scraped": len(all_products),
+                "platforms_with_results": len(platform_results),
+                "total_relevant": len(all_products),
+                "total_filtered": 0,
+            },
+            "timing_ms": {"scrape": scrape_ms, "total": total_ms},
+            "error": str(e),
+        }
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     print("🚀 Starting PriceHunt API Lite v2.0...")
-    print("🤖 AI-powered filtering (no scraping)")
+    print("🤖 AI-powered filtering + optional server-side scraping")
     print(f"📱 Running on port: {port}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
