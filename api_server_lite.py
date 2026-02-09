@@ -549,20 +549,21 @@ async def understand_query(q: str):
 @app.post("/api/ai-extract")
 async def ai_extract_products(request: AIExtractRequest):
     """
-    AI-powered product extraction from raw HTML.
+    AI-powered product extraction from raw HTML with relevance filtering.
     
-    USE THIS WHEN CLIENT-SIDE SCRAPING FAILS.
+    PRIMARY METHOD: All scraping is now AI-based.
     
-    The Android app should:
-    1. Try normal WebView scraping first
-    2. If extraction returns 0 products, send the raw HTML here
-    3. Gemini AI will extract products intelligently
+    This endpoint:
+    1. Extracts products from HTML using AI
+    2. Filters products by relevance to search query (AI-powered)
+    3. Returns only relevant products with quantity and price_per_unit
     
     This handles:
     - Anti-bot protected pages
-    - JavaScript-rendered content that WebView captured
+    - JavaScript-rendered content
     - Pages with unusual HTML structures
     - New/changed website layouts
+    - Dynamic SPAs (Instamart, JioMart, etc.)
     """
     try:
         if not ai_scraper.is_available():
@@ -571,6 +572,7 @@ async def ai_extract_products(request: AIExtractRequest):
                 detail="AI scraper not available - GEMINI_API_KEY not set"
             )
         
+        # Step 1: Extract products from HTML
         result = await ai_scraper.extract_products_from_html(
             html=request.html,
             platform=request.platform,
@@ -578,14 +580,44 @@ async def ai_extract_products(request: AIExtractRequest):
             base_url=request.base_url
         )
         
+        extracted_products = result.get("products", [])
+        if not extracted_products:
+            return {
+                "platform": request.platform,
+                "search_query": request.search_query,
+                "products": [],
+                "products_found": 0,
+                "products_after_filtering": 0,
+                "extraction_method": result.get("extraction_method", "none"),
+                "confidence": result.get("confidence", 0),
+                "ai_powered": result.get("ai_powered", False),
+                "filtered": True,
+                "error": result.get("error")
+            }
+        
+        # Step 2: Filter products by relevance using AI
+        ai_service = get_gemini_service()
+        filter_result = await ai_service.filter_relevant_products(
+            query=request.search_query,
+            products=extracted_products,
+            strict_mode=True
+        )
+        
+        relevant_products = filter_result.get("relevant_products", [])
+        filtered_count = len(filter_result.get("filtered_out", []))
+        
         return {
             "platform": request.platform,
             "search_query": request.search_query,
-            "products": result.get("products", []),
-            "products_found": len(result.get("products", [])),
+            "products": relevant_products,
+            "products_found": len(extracted_products),
+            "products_after_filtering": len(relevant_products),
+            "filtered_out": filtered_count,
             "extraction_method": result.get("extraction_method", "none"),
             "confidence": result.get("confidence", 0),
-            "ai_powered": result.get("ai_powered", False),
+            "ai_powered": True,
+            "filtered": filter_result.get("ai_powered", False),
+            "ai_meta": filter_result.get("ai_meta", {}),
             "error": result.get("error")
         }
     except HTTPException:

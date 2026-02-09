@@ -434,15 +434,27 @@ BASE URL: {base_url}
 
 EXTRACTION RULES:
 1. Find ALL products displayed on this page
-2. Extract: name, price (in INR ₹), original_price (if discounted), image_url, product_url
+2. Extract: name, price (in INR ₹), original_price (if discounted), image_url, product_url, quantity
 3. Price format: Look for ₹ or Rs. followed by numbers (e.g., ₹45, Rs. 120, Rs 99)
 4. Product names are usually in img alt text, h2/h3/h4 tags, or link text
-5. If size/quantity/pack info is visible (e.g., 500ml, 1kg, pack of 6),
-   include it in the product name so the client can compute per-unit price.
-5. Image URLs often contain "cdn", "image", "product" in the path
-6. Product URLs often contain "/p/", "/product/", "/dp/", "/prn/", "/item/"
-7. If product_url is relative (starts with /), prepend the base_url
-8. IGNORE: ads, banners, navigation items, footer content, delivery times shown alone
+5. QUANTITY EXTRACTION (CRITICAL):
+   - Extract quantity from product name or nearby text (e.g., "500ml", "1kg", "500g", "1L", "pack of 6", "6 pcs")
+   - Normalize units: convert ml→ml, g→g, kg→g (multiply by 1000), L→ml (multiply by 1000)
+   - For count-based products (pcs, pieces, tabs, wipes), extract count number
+   - Quantity format: {"value": 500, "unit": "ml"} or {"value": 6, "unit": "pcs"}
+   - If no quantity found, set quantity to null
+6. PRICE PER UNIT CALCULATION:
+   - If quantity exists and value > 0:
+     * For weight/volume: price_per_unit = price / (quantity_value in base unit)
+       - Base units: g (for weight), ml (for volume)
+       - Convert kg→g (×1000), L→ml (×1000)
+       - Display: price_per_100g or price_per_100ml (normalize to 100g/100ml)
+     * For count: price_per_unit = price / quantity_value (price per piece)
+   - If quantity is null or 0, set price_per_unit to null
+7. Image URLs often contain "cdn", "image", "product" in the path
+8. Product URLs often contain "/p/", "/product/", "/dp/", "/prn/", "/item/"
+9. If product_url is relative (starts with /), prepend the base_url
+10. IGNORE: ads, banners, navigation items, footer content, delivery times shown alone
 
 PLATFORM-SPECIFIC HINTS:
 - Zepto: Products in cards, prices near images, URLs have /prn/ pattern
@@ -465,12 +477,27 @@ Return ONLY valid JSON:
             "original_price": 50.00,
             "image_url": "https://...",
             "product_url": "https://...",
-            "in_stock": true
+            "in_stock": true,
+            "quantity": {{"value": 500, "unit": "ml"}},
+            "price_per_unit": 9.0,
+            "price_per_unit_display": "₹9.00/100ml"
         }}
     ],
     "confidence": 0.85,
     "extraction_notes": "Brief notes about extraction quality"
 }}
+
+QUANTITY EXAMPLES:
+- "Amul Milk 500ml" → quantity: {{"value": 500, "unit": "ml"}}
+- "Fortune Oil 1L" → quantity: {{"value": 1000, "unit": "ml"}}
+- "Basmati Rice 1kg" → quantity: {{"value": 1000, "unit": "g"}}
+- "Banana 6 pcs" → quantity: {{"value": 6, "unit": "pcs"}}
+- "Tissue Paper Pack of 4" → quantity: {{"value": 4, "unit": "pcs"}}
+
+PRICE PER UNIT EXAMPLES:
+- Price ₹45, quantity 500ml → price_per_unit: 9.0, price_per_unit_display: "₹9.00/100ml"
+- Price ₹250, quantity 1kg (1000g) → price_per_unit: 25.0, price_per_unit_display: "₹25.00/100g"
+- Price ₹120, quantity 6 pcs → price_per_unit: 20.0, price_per_unit_display: "₹20.00/pc"
 
 IMPORTANT:
 - Return empty products array if no products found
@@ -480,13 +507,63 @@ IMPORTANT:
 
 JSON only:"""
     
+    def _calculate_price_per_unit(self, price: float, quantity: Optional[Dict]) -> tuple[Optional[float], Optional[str]]:
+        """Calculate price per unit from quantity. Returns (price_per_unit, display_string)"""
+        if not quantity or not isinstance(quantity, dict):
+            return None, None
+        
+        qty_value = quantity.get("value")
+        qty_unit = (quantity.get("unit") or "").lower().strip()
+        
+        if not qty_value or qty_value <= 0:
+            return None, None
+        
+        try:
+            qty_value = float(qty_value)
+        except (ValueError, TypeError):
+            return None, None
+        
+        # Normalize to base units and calculate
+        if qty_unit in ["g", "gm", "gram", "grams"]:
+            # Weight: normalize to 100g
+            base_value = qty_value  # already in grams
+            per_unit = (price / base_value) * 100
+            return per_unit, f"₹{per_unit:.2f}/100g"
+        
+        elif qty_unit in ["kg", "kilogram", "kilograms"]:
+            # Weight: convert kg to g, normalize to 100g
+            base_value = qty_value * 1000  # convert to grams
+            per_unit = (price / base_value) * 100
+            return per_unit, f"₹{per_unit:.2f}/100g"
+        
+        elif qty_unit in ["ml", "milliliter", "milliliters"]:
+            # Volume: normalize to 100ml
+            base_value = qty_value  # already in ml
+            per_unit = (price / base_value) * 100
+            return per_unit, f"₹{per_unit:.2f}/100ml"
+        
+        elif qty_unit in ["l", "liter", "litre", "liters", "litres"]:
+            # Volume: convert L to ml, normalize to 100ml
+            base_value = qty_value * 1000  # convert to ml
+            per_unit = (price / base_value) * 100
+            return per_unit, f"₹{per_unit:.2f}/100ml"
+        
+        elif qty_unit in ["pcs", "pc", "piece", "pieces", "count", "pack"]:
+            # Count-based: price per piece
+            per_unit = price / qty_value
+            return per_unit, f"₹{per_unit:.2f}/pc"
+        
+        else:
+            # Unknown unit, try to extract from name
+            return None, None
+    
     def _validate_products(
         self,
         products: List[Dict],
         platform: str,
         base_url: str
     ) -> List[Dict]:
-        """Validate and enrich extracted products"""
+        """Validate and enrich extracted products with price per unit calculation"""
         validated = []
         seen_names = set()
         
@@ -494,18 +571,17 @@ JSON only:"""
             name = p.get("name", "").strip()
             price = p.get("price")
 
-            quantity_hint = (
-                str(p.get("quantity") or p.get("size") or p.get("pack_size") or p.get("packSize") or "")
-            ).strip()
-            if quantity_hint and quantity_hint.lower() not in name.lower():
-                number_match = re.search(r"(\d+(?:\.\d+)?)", quantity_hint)
-                if number_match:
-                    if float(number_match.group(1)) <= 0:
-                        quantity_hint = ""
-                if quantity_hint:
-                    candidate = f"{name} {quantity_hint}".strip()
-                    if len(candidate) <= 150:
-                        name = candidate
+            # Extract quantity from AI response (preferred) or fallback to parsing name
+            quantity = p.get("quantity")
+            if not quantity or not isinstance(quantity, dict):
+                # Fallback: try to extract from name
+                quantity = self._extract_quantity_from_name(name)
+            
+            # Calculate price per unit
+            price_per_unit, price_per_unit_display = self._calculate_price_per_unit(
+                float(price) if price else 0, 
+                quantity
+            )
             
             # Skip invalid products
             if not name or len(name) < 3 or len(name) > 150:
@@ -541,10 +617,41 @@ JSON only:"""
                 "product_url": product_url or base_url,
                 "platform": platform,
                 "in_stock": p.get("in_stock", True),
-                "ai_extracted": True
+                "ai_extracted": True,
+                "quantity": quantity,
+                "price_per_unit": price_per_unit,
+                "price_per_unit_display": price_per_unit_display
             })
         
         return validated[:20]  # Limit to 20 products
+    
+    def _extract_quantity_from_name(self, name: str) -> Optional[Dict]:
+        """Fallback: Extract quantity from product name using regex"""
+        if not name:
+            return None
+        
+        # Patterns for weight/volume
+        patterns = [
+            (r"(\d+(?:\.\d+)?)\s*(kg|kilogram)", "kg", 1000),  # kg → convert to g
+            (r"(\d+(?:\.\d+)?)\s*(g|gm|gram)", "g", 1),  # g
+            (r"(\d+(?:\.\d+)?)\s*(l|liter|litre)", "ml", 1000),  # L → convert to ml
+            (r"(\d+(?:\.\d+)?)\s*(ml|milliliter)", "ml", 1),  # ml
+            (r"(\d+)\s*(pcs|pc|piece|pieces|count|pack)", "pcs", 1),  # count
+        ]
+        
+        name_lower = name.lower()
+        for pattern, unit, multiplier in patterns:
+            match = re.search(pattern, name_lower)
+            if match:
+                value = float(match.group(1)) * multiplier
+                if unit == "kg":
+                    return {"value": value, "unit": "g"}
+                elif unit == "ml" and multiplier == 1000:  # L converted
+                    return {"value": value, "unit": "ml"}
+                else:
+                    return {"value": float(match.group(1)), "unit": unit}
+        
+        return None
 
 
 # Singleton instance
