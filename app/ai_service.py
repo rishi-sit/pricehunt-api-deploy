@@ -219,21 +219,12 @@ class AIService:
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not api_key:
             return
-        env_priority = os.getenv("GEMINI_MODEL_PRIORITY", "").strip()
-        if env_priority:
-            models = [m.strip() for m in env_priority.split(",") if m.strip()]
-        else:
-            primary = os.getenv("GEMINI_MODEL", "gemma-3-27b-it").strip()
-            fallback_env = os.getenv("GEMINI_MODEL_FALLBACKS", "").strip()
-            if fallback_env:
-                fallbacks = [m.strip() for m in fallback_env.split(",") if m.strip()]
-            else:
-                fallbacks = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
-            models = [primary] + [m for m in fallbacks if m and m != primary]
+        # HARDCODED: gemini-2.5-flash first (most reliable), gemma-3-27b-it last (often fails)
+        models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemma-3-27b-it"]
 
         self.providers[self.PROVIDER_GEMINI] = {
             "api_key": api_key,
-            "model": models[0] if models else "gemma-3-27b-it",
+            "model": models[0] if models else "gemini-2.5-flash",
             "models": models,
             "base_url": "https://generativelanguage.googleapis.com/v1beta",
             "type": "gemini"

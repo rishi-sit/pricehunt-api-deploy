@@ -87,16 +87,23 @@ class AIScraper:
         }
     
     def _setup_gemini(self):
-        """Setup Google Gemini provider"""
+        """Setup Google Gemini provider with model fallback"""
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not api_key:
             return
+        # HARDCODED model priority: try gemini-2.5-flash first, then lite, then gemma
+        models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemma-3-27b-it"]
         self.providers[self.PROVIDER_GEMINI] = {
             "api_key": api_key,
-            "model": os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
+            "model": models[0],
+            "models": models,  # All models for fallback
             "base_url": "https://generativelanguage.googleapis.com/v1beta",
             "type": "gemini"
         }
+        # Track unavailable/exhausted models for the day
+        self._gemini_unavailable_models: Dict[str, str] = {}
+        self._gemini_exhausted_models: Dict[str, str] = {}
+        self._gemini_last_reset_date: str = ""
     
     def _get_available_providers(self) -> List[str]:
         """Get list of providers that are configured AND not quota-exhausted"""
@@ -169,34 +176,94 @@ class AIScraper:
             return choices[0].get("message", {}).get("content", "")
         return ""
     
+    def _get_today(self) -> str:
+        """Get today's date string for tracking"""
+        import datetime
+        return datetime.date.today().isoformat()
+    
+    def _reset_gemini_models_if_new_day(self):
+        """Reset model tracking on new day"""
+        today = self._get_today()
+        if hasattr(self, '_gemini_last_reset_date') and self._gemini_last_reset_date != today:
+            self._gemini_unavailable_models = {}
+            self._gemini_exhausted_models = {}
+            self._gemini_last_reset_date = today
+    
+    def _is_gemini_model_available(self, model: str) -> bool:
+        """Check if a specific Gemini model is available today"""
+        self._reset_gemini_models_if_new_day()
+        unavailable = getattr(self, '_gemini_unavailable_models', {})
+        exhausted = getattr(self, '_gemini_exhausted_models', {})
+        return model not in unavailable and model not in exhausted
+    
+    def _mark_gemini_model_unavailable(self, model: str):
+        """Mark a Gemini model as unavailable (404/403 errors)"""
+        if not hasattr(self, '_gemini_unavailable_models'):
+            self._gemini_unavailable_models = {}
+        self._gemini_unavailable_models[model] = self._get_today()
+        print(f"⚠️ AI Scraper: Gemini model {model} marked unavailable for today")
+    
+    def _mark_gemini_model_exhausted(self, model: str):
+        """Mark a Gemini model as quota exhausted (429 errors)"""
+        if not hasattr(self, '_gemini_exhausted_models'):
+            self._gemini_exhausted_models = {}
+        self._gemini_exhausted_models[model] = self._get_today()
+        print(f"🔄 AI Scraper: Gemini model {model} quota exhausted for today")
+    
     async def _generate_gemini(self, prompt: str, config: Dict[str, Any]) -> str:
-        """Generate content using Google Gemini API"""
-        model_name = config["model"]
-        model_path = model_name if model_name.startswith("models/") else f"models/{model_name}"
-        url = f"{config['base_url']}/{model_path}:generateContent"
-        params = {"key": config["api_key"]}
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": self.temperature,
-                "topP": self.top_p,
-                "maxOutputTokens": self.max_output_tokens,
-                "responseMimeType": "application/json"
+        """Generate content using Google Gemini API with model-level fallback"""
+        models = config.get("models", [config["model"]])
+        models_to_try = [m for m in models if self._is_gemini_model_available(m)]
+        
+        if not models_to_try:
+            raise Exception("All Gemini models exhausted or unavailable for today")
+        
+        last_error = None
+        for model_name in models_to_try:
+            model_path = model_name if model_name.startswith("models/") else f"models/{model_name}"
+            url = f"{config['base_url']}/{model_path}:generateContent"
+            params = {"key": config["api_key"]}
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": self.temperature,
+                    "topP": self.top_p,
+                    "maxOutputTokens": self.max_output_tokens,
+                    "responseMimeType": "application/json"
+                }
             }
-        }
+            
+            try:
+                timeout = httpx.Timeout(timeout=self.request_timeout_s, connect=10.0)
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(url, params=params, json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+                
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        return parts[0].get("text", "")
+                return ""
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                last_error = f"HTTP {status}"
+                if status == 429:
+                    self._mark_gemini_model_exhausted(model_name)
+                    continue
+                if status in {403, 404}:
+                    self._mark_gemini_model_unavailable(model_name)
+                    continue
+                # Other errors, try next model
+                print(f"⚠️ AI Scraper: Gemini model {model_name} error: {last_error}, trying next model...")
+                continue
+            except Exception as e:
+                last_error = str(e)
+                print(f"⚠️ AI Scraper: Gemini model {model_name} error: {last_error}, trying next model...")
+                continue
         
-        timeout = httpx.Timeout(timeout=self.request_timeout_s, connect=10.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, params=params, json=payload)
-            response.raise_for_status()
-            data = response.json()
-        
-        candidates = data.get("candidates", [])
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if parts:
-                return parts[0].get("text", "")
-        return ""
+        raise Exception(f"All Gemini models failed. Last error: {last_error}")
     
     async def _generate_with_fallback(self, prompt: str) -> tuple[str, str]:
         """Generate content with automatic fallback and quota tracking. Returns (text, provider_used)"""

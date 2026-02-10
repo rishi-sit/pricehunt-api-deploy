@@ -59,11 +59,15 @@ class ProductGroup(BaseModel):
 class GeminiService:
     """
     Service for Gemini AI interactions.
-    Uses Gemini 1.5 Flash for cost-effective, fast responses.
+    Uses Gemini 2.5 Flash for cost-effective, fast responses with model fallback.
     """
     
+    # HARDCODED model priority: gemini-2.5-flash first, then lite, then gemma
+    GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemma-3-27b-it"]
+    
     def __init__(self, api_key: Optional[str] = None):
-        self.model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+        self.model_name = self.GEMINI_MODELS[0]  # Primary model
+        self.models = self.GEMINI_MODELS  # All models for fallback
         self.request_timeout_s = float(os.getenv("GEMINI_TIMEOUT_SEC", "60"))
         self.max_output_tokens = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "512"))
         self.max_input_products = int(os.getenv("GEMINI_MAX_INPUT_PRODUCTS", "120"))
@@ -75,6 +79,12 @@ class GeminiService:
             "https://generativelanguage.googleapis.com/v1beta"
         )
         self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        
+        # Track unavailable/exhausted models for the day
+        self._gemini_unavailable_models: Dict[str, str] = {}
+        self._gemini_exhausted_models: Dict[str, str] = {}
+        self._gemini_last_reset_date: str = ""
+        
         if not self.api_key:
             print("⚠️ GEMINI_API_KEY not set - AI features will be disabled")
             self.model = None
@@ -95,6 +105,7 @@ class GeminiService:
         transport = "http" if self.use_http else "sdk"
         print(
             f"✅ Gemini AI initialized (model: {self.model_name}, "
+            f"fallbacks: {self.models[1:]}, "
             f"timeout: {self.request_timeout_s}s, "
             f"max_tokens: {self.max_output_tokens}, "
             f"transport: {transport})"
@@ -103,6 +114,39 @@ class GeminiService:
     def is_available(self) -> bool:
         """Check if Gemini is properly configured"""
         return self.model is not None
+
+    def _get_today(self) -> str:
+        """Get today's date string for tracking"""
+        import datetime
+        return datetime.date.today().isoformat()
+    
+    def _reset_models_if_new_day(self):
+        """Reset model tracking on new day"""
+        today = self._get_today()
+        if self._gemini_last_reset_date != today:
+            self._gemini_unavailable_models = {}
+            self._gemini_exhausted_models = {}
+            self._gemini_last_reset_date = today
+    
+    def _is_model_available(self, model: str) -> bool:
+        """Check if a specific Gemini model is available today"""
+        self._reset_models_if_new_day()
+        return model not in self._gemini_unavailable_models and model not in self._gemini_exhausted_models
+    
+    def _mark_model_unavailable(self, model: str):
+        """Mark a Gemini model as unavailable (404/403 errors)"""
+        self._gemini_unavailable_models[model] = self._get_today()
+        print(f"⚠️ Gemini Service: Model {model} marked unavailable for today")
+    
+    def _mark_model_exhausted(self, model: str):
+        """Mark a Gemini model as quota exhausted (429 errors)"""
+        self._gemini_exhausted_models[model] = self._get_today()
+        print(f"🔄 Gemini Service: Model {model} quota exhausted for today")
+    
+    def _get_available_models(self) -> List[str]:
+        """Get list of models that are available today"""
+        self._reset_models_if_new_day()
+        return [m for m in self.models if self._is_model_available(m)]
 
     def _extract_usage_metadata(self, response: Any) -> Dict[str, Optional[int]]:
         usage = getattr(response, "usage_metadata", None)
@@ -305,36 +349,63 @@ class GeminiService:
         return response.text, self._extract_usage_metadata(response)
 
     async def _generate_content_http(self, prompt: str) -> tuple[str, Dict[str, Optional[int]]]:
-        model_name = self.model_name.strip()
-        model_path = model_name if model_name.startswith("models/") else f"models/{model_name}"
-        url = f"{self.http_base_url}/{model_path}:generateContent"
-        params = {"key": self.api_key}
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": self.temperature,
-                "topP": self.top_p,
-                "maxOutputTokens": self.max_output_tokens,
-                "responseMimeType": "application/json"
+        """Generate content using HTTP API with model-level fallback"""
+        models_to_try = self._get_available_models()
+        
+        if not models_to_try:
+            raise Exception("All Gemini models exhausted or unavailable for today")
+        
+        last_error = None
+        for model_name in models_to_try:
+            model_path = model_name if model_name.startswith("models/") else f"models/{model_name}"
+            url = f"{self.http_base_url}/{model_path}:generateContent"
+            params = {"key": self.api_key}
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": self.temperature,
+                    "topP": self.top_p,
+                    "maxOutputTokens": self.max_output_tokens,
+                    "responseMimeType": "application/json"
+                }
             }
-        }
-        timeout = httpx.Timeout(
-            timeout=self.request_timeout_s,
-            connect=min(self.request_timeout_s, 10.0)
-        )
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, params=params, json=payload)
-            response.raise_for_status()
-            data = response.json()
+            
+            try:
+                timeout = httpx.Timeout(
+                    timeout=self.request_timeout_s,
+                    connect=min(self.request_timeout_s, 10.0)
+                )
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(url, params=params, json=payload)
+                    response.raise_for_status()
+                    data = response.json()
 
-        candidates = data.get("candidates", [])
-        text = ""
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if parts:
-                text = parts[0].get("text", "")
+                candidates = data.get("candidates", [])
+                text = ""
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        text = parts[0].get("text", "")
 
-        return text, self._extract_http_usage(data)
+                return text, self._extract_http_usage(data)
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                last_error = f"HTTP {status}"
+                if status == 429:
+                    self._mark_model_exhausted(model_name)
+                    continue
+                if status in {403, 404}:
+                    self._mark_model_unavailable(model_name)
+                    continue
+                # Other errors, try next model
+                print(f"⚠️ Gemini Service: Model {model_name} error: {last_error}, trying next model...")
+                continue
+            except Exception as e:
+                last_error = str(e)
+                print(f"⚠️ Gemini Service: Model {model_name} error: {last_error}, trying next model...")
+                continue
+        
+        raise Exception(f"All Gemini models failed. Last error: {last_error}")
 
     async def ping(self) -> Dict[str, Any]:
         """
