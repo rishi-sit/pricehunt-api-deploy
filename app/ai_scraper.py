@@ -441,7 +441,7 @@ EXTRACTION RULES:
    - Extract quantity from product name or nearby text (e.g., "500ml", "1kg", "500g", "1L", "pack of 6", "6 pcs")
    - Normalize units: convert ml→ml, g→g, kg→g (multiply by 1000), L→ml (multiply by 1000)
    - For count-based products (pcs, pieces, tabs, wipes), extract count number
-   - Quantity format: {"value": 500, "unit": "ml"} or {"value": 6, "unit": "pcs"}
+   - Quantity format: {{"value": 500, "unit": "ml"}} or {{"value": 6, "unit": "pcs"}}
    - If no quantity found, set quantity to null
 6. PRICE PER UNIT CALCULATION:
    - If quantity exists and value > 0:
