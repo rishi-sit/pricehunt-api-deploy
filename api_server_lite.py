@@ -623,7 +623,23 @@ async def ai_extract_products(request: AIExtractRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        error_detail = f"{str(e)}\n{traceback.format_exc()}"
+        print(f"❌ /api/ai-extract error for {request.platform}: {error_detail}")
+        # Return a proper response instead of raising 500, so client can handle it
+        return {
+            "platform": request.platform,
+            "search_query": request.search_query,
+            "products": [],
+            "products_found": 0,
+            "products_after_filtering": 0,
+            "filtered_out": 0,
+            "extraction_method": "error",
+            "confidence": 0,
+            "ai_powered": False,
+            "filtered": False,
+            "error": f"Backend error: {str(e)}"
+        }
 
 
 @app.post("/api/ai-extract-multi")
