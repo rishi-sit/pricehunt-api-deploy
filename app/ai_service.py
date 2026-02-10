@@ -242,7 +242,7 @@ class AIService:
     def _get_available_providers(self) -> List[str]:
         """Get list of providers that are configured AND not quota-exhausted"""
         # Priority order can be overridden via AI_PROVIDER_PRIORITY (e.g. "gemini,groq,mistral").
-        default_priority = [self.PROVIDER_GROQ, self.PROVIDER_GEMINI, self.PROVIDER_MISTRAL]
+        default_priority = [self.PROVIDER_GEMINI, self.PROVIDER_GROQ, self.PROVIDER_MISTRAL]
         env_priority = os.getenv("AI_PROVIDER_PRIORITY", "").strip()
         if env_priority:
             requested = [p.strip().lower() for p in env_priority.split(",") if p.strip()]
