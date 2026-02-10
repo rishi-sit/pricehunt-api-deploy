@@ -1384,42 +1384,127 @@ JSON only, no explanation:"""
 
         query_words = query.lower().strip().split()
         is_multi_word = len(query_words) > 1
-        threshold = 60 if is_multi_word else 50
+        query_lower = query.lower().strip()
+        
+        # STRICTER THRESHOLDS for better filtering
+        # Multi-word queries need ALL words to match
+        if is_multi_word:
+            threshold = 75  # Increased from 60 - ALL words must match
+        elif query_lower in ["milk", "rice", "oil", "sugar", "salt", "flour", "wheat", "banana", "apple", "onion", "potato", "tomato"]:
+            threshold = 75  # Increased from 70 - stricter for common items with many derivatives
+        else:
+            threshold = 70  # Increased from 60 - better filtering for single words
+
+        # Special handling for "milk" - has many derivatives that should be excluded
+        milk_note = ""
+        if query_lower == "milk":
+            milk_note = """
+CRITICAL: User searched for "milk" (the dairy product).
+EXCLUDE these derivatives (score 0-30):
+- Milk chocolate, chocolate milk, milkshake, milk powder, condensed milk
+- Milk-based products like milk cake, milk bread (unless specifically milk as ingredient)
+- Products with "milk" in brand name but not the actual product (e.g., "Dairy Milk" chocolate)
+- Milk-based beverages, shakes, smoothies
+
+INCLUDE only (score 75-100):
+- Actual milk products: "Amul Milk", "Toned Milk", "Full Cream Milk", "Double Toned Milk"
+- Milk variants: "Skimmed Milk", "Organic Milk", "A2 Milk", "Cow Milk", "Buffalo Milk"
+- Must be liquid milk, not processed/derived products
+
+Examples:
+- "Amul Full Cream Milk 500ml" = 95 ✓ (IS milk)
+- "Mother Dairy Double Toned Milk 1L" = 95 ✓ (IS milk)
+- "Cadbury Dairy Milk Chocolate" = 15 ✗ (chocolate, not milk)
+- "Nestle Milkmaid Condensed Milk" = 20 ✗ (condensed milk, not regular milk)
+- "Amul Milkshake" = 10 ✗ (beverage, not milk)
+- "Amul Milk Chocolate" = 5 ✗ (chocolate, not milk)
+"""
 
         multi_word_note = ""
         if is_multi_word:
+            # Extract key words for better matching
+            key_words = [w for w in query_words if len(w) > 2]  # Ignore short words like "a", "an", "the"
             multi_word_note = f"""
-IMPORTANT: The user searched for "{query}" (multi-word query).
-This is a SPECIFIC search — ALL query words must be present or closely matched in the product.
-Products that match only SOME words should score LOW.
-Example: if query is "milk double toned", then:
-- "Amul Double Toned Milk 500ml" = 95 (matches all words)
-- "Mother Dairy Double Toned Milk 1L" = 95 (matches all words)
-- "Amul Toned Milk 500ml" = 35 (missing "double" — wrong variant)
-- "Amul Full Cream Milk 1L" = 25 (wrong variant entirely)
-- "Cadbury Dairy Milk Chocolate" = 0 (not milk at all)
+CRITICAL: The user searched for "{query}" (multi-word query with {len(key_words)} key words: {', '.join(key_words)}).
+This is a SPECIFIC search — ALL key words MUST be present or closely matched in the product name.
+Products that match only SOME words should score LOW (0-40).
+
+STRICT MATCHING RULES:
+- Score 90-100: ALL key words present, exact match or very close variant
+- Score 70-89: ALL key words present but different order or slight variation (ONLY if still the same product)
+- Score 40-69: Missing 1 key word or wrong variant - FILTER OUT
+- Score 0-39: Missing 2+ key words or completely different product - FILTER OUT
+
+Examples for "milk double toned":
+- "Amul Double Toned Milk 500ml" = 95 ✓ (has "milk", "double", "toned" - ALL words match)
+- "Mother Dairy Double Toned Milk 1L" = 95 ✓ (has all words, correct product)
+- "Amul Toned Milk 500ml" = 35 ✗ (missing "double" - wrong variant, FILTER OUT)
+- "Amul Full Cream Milk 1L" = 20 ✗ (missing "double toned" - wrong variant, FILTER OUT)
+- "Cadbury Dairy Milk Chocolate" = 5 ✗ (not milk at all, FILTER OUT)
+
+Examples for "banana yellow fresh":
+- "Fresh Yellow Banana 6pc" = 95 ✓ (has "banana", "yellow", "fresh" - ALL words match)
+- "Yellow Banana 1kg" = 70 ✓ (has "banana" and "yellow", "fresh" implied - acceptable)
+- "Green Banana 1kg" = 25 ✗ (missing "yellow" - wrong variant, FILTER OUT)
+- "Banana Chips" = 10 ✗ (processed product, not fresh banana, FILTER OUT)
+
+REMEMBER: For multi-word queries, be STRICT. Missing even ONE key word means the product is NOT what the user wants.
 """
 
-        return f'''Score each product's relevance to "{query}" from 0-100.
+        return f'''You are an expert product relevance filter. Score each product's relevance to the user's search query "{query}" from 0-100.
 
-Products: {products_json}
+Products to score: {products_json}
+{milk_note}
 {multi_word_note}
-Scoring guide for "{query}":
-- 90-100: The product IS exactly "{query}" (matches all query words)
-- 70-89: Very close variant (e.g., same product, slightly different description)
-- 40-69: Related but different variant (e.g., different type/flavor)
-- 0-39: NOT what user wants, just contains some words from query
 
-Examples for "banana":
-- "Fresh Yellow Banana 6pc" = 95 (IS banana)
-- "Organic Banana 1kg" = 95 (IS banana)
-- "Banana Chips" = 20 (processed snack)
-- "Banana Shake" = 15 (beverage)
+SCORING GUIDELINES FOR "{query}":
+- 90-100: The product IS exactly "{query}" (matches ALL query words, is the actual product the user wants)
+- 75-89: Very close variant (same product type, all key words present, minor differences like brand or size)
+- 50-74: Related but different variant (missing key words or wrong type/flavor) - FILTER OUT
+- 25-49: Partially related but NOT what user wants - FILTER OUT
+- 0-24: Completely irrelevant, just contains some words from query - FILTER OUT
 
-Return JSON: {{"relevant_items":[{{"id":0,"relevance_score":95,"relevance_reason":"exact match"}}],"filtered_ids":[3,4]}}
+CRITICAL RULES:
+1. For multi-word queries: ALL key words must be present. Missing even ONE key word = score < 50 (FILTER OUT)
+2. For single-word queries: Be strict about derivatives. "milk chocolate" is NOT "milk"
+3. Processed/derived products are NOT the same as the base product (e.g., "banana chips" ≠ "banana")
+4. Wrong variants/flavors/types should be filtered out (e.g., "full cream milk" ≠ "double toned milk")
 
-Include in relevant_items: ALL products with score >= {threshold}
-Include in filtered_ids: ALL products with score < {threshold}'''
+EXAMPLES FOR SINGLE-WORD QUERIES:
+Query: "banana"
+- "Fresh Yellow Banana 6pc" = 95 ✓ (IS banana)
+- "Organic Banana 1kg" = 95 ✓ (IS banana)
+- "Banana Chips" = 20 ✗ (processed snack - FILTER OUT)
+- "Banana Shake" = 15 ✗ (beverage - FILTER OUT)
+- "Banana Bread" = 10 ✗ (baked product - FILTER OUT)
+
+Query: "rice"
+- "Basmati Rice 1kg" = 95 ✓ (IS rice)
+- "Brown Rice 500g" = 95 ✓ (IS rice)
+- "Rice Flour" = 25 ✗ (processed product - FILTER OUT)
+- "Rice Cakes" = 15 ✗ (processed snack - FILTER OUT)
+
+EXAMPLES FOR MULTI-WORD QUERIES:
+Query: "milk double toned"
+- "Amul Double Toned Milk 500ml" = 95 ✓ (has "milk", "double", "toned" - ALL words)
+- "Mother Dairy Double Toned Milk 1L" = 95 ✓ (ALL words present)
+- "Amul Toned Milk 500ml" = 35 ✗ (missing "double" - FILTER OUT)
+- "Amul Full Cream Milk" = 20 ✗ (missing "double toned" - FILTER OUT)
+
+Query: "banana yellow fresh"
+- "Fresh Yellow Banana 6pc" = 95 ✓ (has "banana", "yellow", "fresh" - ALL words)
+- "Yellow Banana 1kg" = 75 ✓ (has "banana" and "yellow", "fresh" implied)
+- "Green Banana 1kg" = 30 ✗ (missing "yellow" - FILTER OUT)
+- "Banana Chips" = 10 ✗ (not fresh banana - FILTER OUT)
+
+OUTPUT FORMAT:
+Return ONLY valid JSON:
+{{"relevant_items":[{{"id":0,"relevance_score":95,"relevance_reason":"exact match - all words present"}}],"filtered_ids":[3,4]}}
+
+STRICT FILTERING RULE: 
+- Include in relevant_items ONLY products with score >= {threshold}
+- Include in filtered_ids: ALL products with score < {threshold}
+- Be STRICT - it's better to filter out a borderline product than show irrelevant results'''
     
     def _build_matching_prompt(self, products: List[Dict]) -> str:
         """Build the prompt for product matching"""
