@@ -464,32 +464,72 @@ class AIScraper:
         }
     
     def _preprocess_html(self, html: str) -> str:
-        """Clean HTML for better AI processing"""
-        # Remove script tags
-        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        """Clean HTML for better AI processing while PRESERVING important JSON data"""
+        
+        # CRITICAL: Extract and preserve JSON data from important script tags FIRST
+        preserved_json = []
+        
+        # Pattern 1: __NEXT_DATA__ (Next.js apps like BigBasket)
+        next_data_match = re.search(r'<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, flags=re.DOTALL | re.IGNORECASE)
+        if next_data_match:
+            preserved_json.append(f"__NEXT_DATA_JSON__: {next_data_match.group(1)[:30000]}")
+        
+        # Pattern 2: application/ld+json (Schema.org product data)
+        ld_json_matches = re.findall(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, flags=re.DOTALL | re.IGNORECASE)
+        for i, match in enumerate(ld_json_matches[:3]):  # Limit to 3
+            preserved_json.append(f"__LD_JSON_{i}__: {match[:10000]}")
+        
+        # Pattern 3: Preloaded state (React/Redux apps)
+        preload_patterns = [
+            r'window\.__PRELOADED_STATE__\s*=\s*(\{.*?\});',
+            r'window\.__INITIAL_STATE__\s*=\s*(\{.*?\});',
+            r'window\.__DATA__\s*=\s*(\{.*?\});',
+        ]
+        for pattern in preload_patterns:
+            match = re.search(pattern, html, flags=re.DOTALL)
+            if match:
+                preserved_json.append(f"__PRELOADED_STATE__: {match.group(1)[:20000]}")
+                break
+        
+        # Pattern 4: Look for inline JSON with products array
+        product_json_match = re.search(r'"products"\s*:\s*\[(.*?)\]', html, flags=re.DOTALL)
+        if product_json_match and len(product_json_match.group(0)) > 100:
+            preserved_json.append(f"__PRODUCTS_JSON__: [{product_json_match.group(1)[:20000]}]")
+        
+        # Now remove non-essential script tags (keep style for some context)
+        # Remove inline event handler scripts
+        html = re.sub(r'<script[^>]*>(?:(?!__NEXT_DATA__|application/ld\+json).)*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        
         # Remove style tags
         html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
         # Remove comments
         html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL)
+        # Remove SVG content (usually icons)
+        html = re.sub(r'<svg[^>]*>.*?</svg>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        # Remove base64 images (huge and useless for extraction)
+        html = re.sub(r'data:image/[^"\']+', 'IMG_DATA', html)
         # Remove excessive whitespace
         html = re.sub(r'\s+', ' ', html)
-        # Remove SVG content
-        html = re.sub(r'<svg[^>]*>.*?</svg>', '', html, flags=re.DOTALL | re.IGNORECASE)
-        # Remove base64 images
-        html = re.sub(r'data:image/[^"\']+', 'IMAGE_DATA', html)
         
-        # Limit size (Gemini has token limits)
-        max_chars = 100000  # ~25k tokens
-        if len(html) > max_chars:
+        # Combine preserved JSON with cleaned HTML
+        json_section = "\n\n=== PRESERVED JSON DATA (IMPORTANT - CHECK FOR PRODUCTS) ===\n" + "\n".join(preserved_json) if preserved_json else ""
+        
+        # Limit total size
+        max_html_chars = 70000
+        max_json_chars = 30000
+        
+        if len(html) > max_html_chars:
             # Try to keep the product-relevant parts
-            # Look for common product container patterns
             product_section = self._find_product_section(html)
             if product_section and len(product_section) > 5000:
-                html = product_section[:max_chars]
+                html = product_section[:max_html_chars]
             else:
-                html = html[:max_chars]
+                html = html[:max_html_chars]
         
-        return html.strip()
+        if len(json_section) > max_json_chars:
+            json_section = json_section[:max_json_chars]
+        
+        return (html + json_section).strip()
     
     def _find_product_section(self, html: str) -> Optional[str]:
         """Try to find the main product listing section"""
@@ -516,84 +556,75 @@ class AIScraper:
     ) -> str:
         """Build the prompt for Gemini extraction"""
         
-        return f"""You are an expert web scraper. Extract ALL product information from this e-commerce HTML.
+        return f"""You are an expert web scraper specializing in Indian e-commerce grocery platforms. Extract ALL product information from this HTML.
 
 PLATFORM: {platform}
 SEARCH QUERY: "{search_query}"
 BASE URL: {base_url}
 
+CRITICAL: LOOK FOR DATA IN MULTIPLE PLACES:
+1. **JSON DATA IN SCRIPTS** (Most Important for SPAs):
+   - Look for <script id="__NEXT_DATA__"> containing JSON with product arrays
+   - Look for <script type="application/ld+json"> with product schema
+   - Look for window.__PRELOADED_STATE__, window.__INITIAL_STATE__, or similar
+   - Look for data attributes like data-testid, data-product-id, data-item
+   - Search for patterns: "products":[, "items":[, "searchResults":[, "widgets":[
+
+2. **VISIBLE HTML ELEMENTS**:
+   - Product cards in div/article elements with class containing: product, item, card, plp, search-result
+   - Prices in span/div with class containing: price, mrp, amount, cost, rupee
+   - Product names in h1/h2/h3/h4/a/span or img alt text
+   - Look for ₹, Rs., Rs, INR followed by numbers
+
+3. **PLATFORM-SPECIFIC PATTERNS**:
+   - **Zepto**: JSON in scripts, product cards, /prn/ URLs, prices in "₹XX" format
+   - **Blinkit**: data-* attributes, product-card class, /prn/ or /prid/ URLs
+   - **BigBasket**: __NEXT_DATA__ script has all products, /pd/ URLs, "products" array in JSON
+   - **Instamart/Swiggy**: Cloudinary image URLs (res.cloudinary.com), nested "widgets" in JSON
+   - **Flipkart/Flipkart Minutes**: data-id attributes, _FSPP_ scripts, /p/ URLs
+   - **JioMart/JioMart Quick**: plp-card class, /p/ URLs, Vue.js data
+   - **Amazon/Amazon Fresh**: data-asin attributes, /dp/ URLs, s-result-item class
+
 EXTRACTION RULES:
-1. Find ALL products displayed on this page
-2. Extract: name, price (in INR ₹), original_price (if discounted), image_url, product_url, quantity
-3. Price format: Look for ₹ or Rs. followed by numbers (e.g., ₹45, Rs. 120, Rs 99)
-4. Product names are usually in img alt text, h2/h3/h4 tags, or link text
-5. QUANTITY EXTRACTION (CRITICAL):
-   - Extract quantity from product name or nearby text (e.g., "500ml", "1kg", "500g", "1L", "pack of 6", "6 pcs")
-   - Normalize units: convert ml→ml, g→g, kg→g (multiply by 1000), L→ml (multiply by 1000)
-   - For count-based products (pcs, pieces, tabs, wipes), extract count number
-   - Quantity format: {{"value": 500, "unit": "ml"}} or {{"value": 6, "unit": "pcs"}}
-   - If no quantity found, set quantity to null
-6. PRICE PER UNIT CALCULATION:
-   - If quantity exists and value > 0:
-     * For weight/volume: price_per_unit = price / (quantity_value in base unit)
-       - Base units: g (for weight), ml (for volume)
-       - Convert kg→g (×1000), L→ml (×1000)
-       - Display: price_per_100g or price_per_100ml (normalize to 100g/100ml)
-     * For count: price_per_unit = price / quantity_value (price per piece)
-   - If quantity is null or 0, set price_per_unit to null
-7. Image URLs often contain "cdn", "image", "product" in the path
-8. Product URLs often contain "/p/", "/product/", "/dp/", "/prn/", "/item/"
-9. If product_url is relative (starts with /), prepend the base_url
-10. IGNORE: ads, banners, navigation items, footer content, delivery times shown alone
+1. Extract: name, price (INR), original_price (if discounted), image_url, product_url
+2. Price MUST be a number (not string), e.g., 45.00 not "₹45"
+3. Clean product names - remove extra whitespace, "Add to Cart", etc.
+4. For relative URLs (starting with /), prepend: {base_url}
+5. QUANTITY: Extract from name (e.g., "500ml", "1kg", "6 pcs")
+   - Format: {{"value": 500, "unit": "ml"}} or {{"value": 6, "unit": "pcs"}}
+6. PRICE_PER_UNIT: Calculate if quantity exists
+   - Weight/Volume: normalize to per 100g or 100ml
+   - Count: price per piece
 
-PLATFORM-SPECIFIC HINTS:
-- Zepto: Products in cards, prices near images, URLs have /prn/ pattern
-- Blinkit: Uses data-* attributes, URLs have /prn/ or /prid/ pattern
-- BigBasket: Next.js app, check __NEXT_DATA__ script, URLs have /pd/ pattern
-- Instamart/Swiggy: Cloudinary images, nested JSON in scripts
-- Flipkart: data-id attributes, ₹ symbol prices, /p/ URL pattern
-- JioMart: Product cards with plp-card class, /p/ URL pattern
-- Amazon: data-asin attributes, /dp/ URLs
+IGNORE: ads, sponsored banners, delivery info, navigation, footers, login prompts
 
-HTML CONTENT:
+HTML CONTENT (may contain embedded JSON):
 {html[:80000]}
 
-Return ONLY valid JSON:
+Return ONLY valid JSON (no markdown, no explanation):
 {{
     "products": [
         {{
-            "name": "Product name (clean, no extra text)",
+            "name": "Fresh Banana 6 pcs",
             "price": 45.00,
             "original_price": 50.00,
-            "image_url": "https://...",
-            "product_url": "https://...",
+            "image_url": "https://cdn.example.com/banana.jpg",
+            "product_url": "https://example.com/p/banana",
             "in_stock": true,
-            "quantity": {{"value": 500, "unit": "ml"}},
-            "price_per_unit": 9.0,
-            "price_per_unit_display": "₹9.00/100ml"
+            "quantity": {{"value": 6, "unit": "pcs"}},
+            "price_per_unit": 7.5,
+            "price_per_unit_display": "₹7.50/pc"
         }}
     ],
     "confidence": 0.85,
-    "extraction_notes": "Brief notes about extraction quality"
+    "extraction_notes": "Found products in __NEXT_DATA__ JSON"
 }}
 
-QUANTITY EXAMPLES:
-- "Amul Milk 500ml" → quantity: {{"value": 500, "unit": "ml"}}
-- "Fortune Oil 1L" → quantity: {{"value": 1000, "unit": "ml"}}
-- "Basmati Rice 1kg" → quantity: {{"value": 1000, "unit": "g"}}
-- "Banana 6 pcs" → quantity: {{"value": 6, "unit": "pcs"}}
-- "Tissue Paper Pack of 4" → quantity: {{"value": 4, "unit": "pcs"}}
-
-PRICE PER UNIT EXAMPLES:
-- Price ₹45, quantity 500ml → price_per_unit: 9.0, price_per_unit_display: "₹9.00/100ml"
-- Price ₹250, quantity 1kg (1000g) → price_per_unit: 25.0, price_per_unit_display: "₹25.00/100g"
-- Price ₹120, quantity 6 pcs → price_per_unit: 20.0, price_per_unit_display: "₹20.00/pc"
-
 IMPORTANT:
-- Return empty products array if no products found
-- Price must be a number (not string)
-- Confidence: 0.9+ if clear product grid, 0.7-0.9 if some uncertainty, <0.7 if guessing
-- Maximum 20 products
+- Extract UP TO 20 products maximum
+- MUST find products if they exist - check JSON in scripts thoroughly
+- If no products found after checking all sources, return empty array with low confidence
+- Price range: ₹1 to ₹50000 (reject outliers)
 
 JSON only:"""
     
