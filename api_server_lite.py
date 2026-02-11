@@ -121,6 +121,25 @@ async def health_check():
     }
 
 
+@app.post("/api/reset-quota")
+async def reset_quota():
+    """
+    Force reset all AI quota tracking.
+    Use this when all providers are exhausted and you need to test immediately.
+    WARNING: Use sparingly - may cause actual rate limit errors if called too often.
+    """
+    ai_service_result = gemini.force_reset_quota()
+    ai_scraper_result = ai_scraper.force_reset_quota()
+    
+    return {
+        "message": "All AI quotas reset successfully",
+        "ai_service": ai_service_result,
+        "ai_scraper": ai_scraper_result,
+        "ai_available": gemini.is_available(),
+        "ai_scraper_available": ai_scraper.is_available()
+    }
+
+
 @app.get("/api/gemini-ping")
 async def gemini_ping():
     """Quick connectivity test for Gemini API."""

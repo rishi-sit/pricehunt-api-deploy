@@ -124,6 +124,29 @@ class AIScraper:
     def is_available(self) -> bool:
         return self._available and len(self._get_available_providers()) > 0
     
+    def force_reset_quota(self) -> Dict[str, Any]:
+        """Force reset all quota tracking for AI Scraper"""
+        # Reset global quota tracker (shared with AIService)
+        quota_result = self.quota.force_reset()
+        
+        # Reset Gemini model-level tracking
+        old_state = {
+            "gemini_models_unavailable": list(getattr(self, '_gemini_unavailable_models', {}).keys()),
+            "gemini_models_exhausted": list(getattr(self, '_gemini_exhausted_models', {}).keys())
+        }
+        self._gemini_unavailable_models = {}
+        self._gemini_exhausted_models = {}
+        self._gemini_last_reset_date = self._get_today()
+        
+        print(f"🔄 AI Scraper: FORCED quota reset - all models now available")
+        
+        return {
+            "message": "AI Scraper quota reset successful",
+            "quota_tracker_reset": quota_result,
+            "previous_state": old_state,
+            "is_available": self.is_available()
+        }
+
     async def _generate_content(self, prompt: str, provider: Optional[str] = None) -> str:
         """Generate content using specified provider"""
         provider = provider or self.provider

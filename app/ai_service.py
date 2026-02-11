@@ -120,6 +120,19 @@ class QuotaTracker:
             "available_providers": [p for p in ["groq", "mistral", "gemini"] 
                                    if p not in self._exhausted_providers]
         }
+    
+    def force_reset(self) -> Dict[str, Any]:
+        """Force reset all quota tracking (for testing/debugging)"""
+        old_stats = self.get_stats()
+        self._exhausted_providers.clear()
+        self._request_counts.clear()
+        self._last_reset_date = self._get_today()
+        print(f"🔄 FORCED quota reset - all providers now available")
+        return {
+            "message": "Quota reset successful",
+            "previous_state": old_stats,
+            "new_state": self.get_stats()
+        }
 
 
 # Global quota tracker (shared across requests)
@@ -313,6 +326,31 @@ class AIService:
             stats["gemini_models_unavailable"] = list(self._gemini_unavailable_models.keys())
         return stats
     
+    def force_reset_quota(self) -> Dict[str, Any]:
+        """Force reset all quota tracking including Gemini model-level tracking"""
+        # Reset global quota tracker
+        quota_result = self.quota.force_reset()
+        
+        # Reset Gemini model-level tracking
+        old_gemini_state = {
+            "gemini_model_request_counts": dict(self._gemini_request_counts),
+            "gemini_models_exhausted": list(self._gemini_exhausted_models.keys()),
+            "gemini_models_unavailable": list(self._gemini_unavailable_models.keys())
+        }
+        self._gemini_exhausted_models.clear()
+        self._gemini_unavailable_models.clear()
+        self._gemini_request_counts.clear()
+        self._gemini_last_reset_date = self._get_today()
+        
+        print(f"🔄 FORCED Gemini model quota reset - all models now available")
+        
+        return {
+            "message": "Full quota reset successful",
+            "quota_tracker_reset": quota_result,
+            "gemini_previous_state": old_gemini_state,
+            "new_state": self.get_quota_stats()
+        }
+
     async def _generate_content(
         self, 
         prompt: str, 
