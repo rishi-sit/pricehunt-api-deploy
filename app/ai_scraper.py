@@ -491,10 +491,31 @@ class AIScraper:
                 preserved_json.append(f"__PRELOADED_STATE__: {match.group(1)[:20000]}")
                 break
         
-        # Pattern 4: Look for inline JSON with products array
-        product_json_match = re.search(r'"products"\s*:\s*\[(.*?)\]', html, flags=re.DOTALL)
-        if product_json_match and len(product_json_match.group(0)) > 100:
-            preserved_json.append(f"__PRODUCTS_JSON__: [{product_json_match.group(1)[:20000]}]")
+        # Pattern 4: Look for inline JSON with products/items array
+        product_json_patterns = [
+            r'"products"\s*:\s*\[([^\]]+(?:\[[^\]]*\][^\]]*)*)\]',
+            r'"items"\s*:\s*\[([^\]]+(?:\[[^\]]*\][^\]]*)*)\]',
+            r'"searchResults"\s*:\s*\[([^\]]+(?:\[[^\]]*\][^\]]*)*)\]',
+            r'"resultsList"\s*:\s*\[([^\]]+(?:\[[^\]]*\][^\]]*)*)\]',
+        ]
+        for pattern in product_json_patterns:
+            product_json_match = re.search(pattern, html, flags=re.DOTALL)
+            if product_json_match and len(product_json_match.group(0)) > 100:
+                preserved_json.append(f"__PRODUCTS_JSON__: [{product_json_match.group(1)[:20000]}]")
+                break
+        
+        # Pattern 5: JioMart/Magento specific - look for Magento JSON structures
+        magento_patterns = [
+            r'var\s+mageConfig\s*=\s*(\{.*?\});',
+            r'window\.jiomart\s*=\s*(\{.*?\});',
+            r'"productInfo"\s*:\s*(\{[^}]+\})',
+            r'"plpProductInfo"\s*:\s*(\[.*?\])',
+        ]
+        for pattern in magento_patterns:
+            match = re.search(pattern, html, flags=re.DOTALL)
+            if match and len(match.group(0)) > 50:
+                preserved_json.append(f"__MAGENTO_DATA__: {match.group(1)[:15000]}")
+                break
         
         # Now remove non-essential script tags (keep style for some context)
         # Remove inline event handler scripts
@@ -582,7 +603,7 @@ CRITICAL: LOOK FOR DATA IN MULTIPLE PLACES:
    - **BigBasket**: __NEXT_DATA__ script has all products, /pd/ URLs, "products" array in JSON
    - **Instamart/Swiggy**: Cloudinary image URLs (res.cloudinary.com), nested "widgets" in JSON
    - **Flipkart/Flipkart Minutes**: data-id attributes, _FSPP_ scripts, /p/ URLs
-   - **JioMart/JioMart Quick**: plp-card class, /p/ URLs, Vue.js data
+   - **JioMart/JioMart Quick**: Look for plp-card, product-card-wrap, product-grid classes. URLs like /p/XXXXX or /pd/XXXXX. Images from jiomartmedia.com or jiomart.com. Prices in "₹XX" or "Rs. XX" format. Look for product-name, product-title, offer-price, mrp-price classes.
    - **Amazon/Amazon Fresh**: data-asin attributes, /dp/ URLs, s-result-item class
 
 EXTRACTION RULES:
