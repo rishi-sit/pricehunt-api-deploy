@@ -329,6 +329,82 @@ async def cache_clear():
     return {"status": "cleared", "message": "Cache cleared successfully"}
 
 
+# ========== BACKEND PLAYWRIGHT SCRAPE (For when device extraction fails) ==========
+
+class PlatformScrapeRequest(BaseModel):
+    """Request to scrape a single platform using Playwright."""
+    platform: str
+    query: str
+    pincode: str = "560001"
+
+
+@app.post("/api/scrape/platform")
+async def scrape_platform(request: PlatformScrapeRequest):
+    """
+    Scrape a single platform using Playwright browser automation.
+    
+    This endpoint is called by the mobile app when device-side extraction fails.
+    It uses a full headless browser which is more reliable than WebView.
+    
+    Platforms: Zepto, Blinkit, BigBasket, Instamart, Flipkart, Flipkart Minutes,
+               Amazon, Amazon Fresh, JioMart, JioMart Quick
+    """
+    platform_map = {
+        "zepto": ZeptoScraper,
+        "blinkit": BlinkitScraper,
+        "bigbasket": BigBasketScraper,
+        "instamart": InstamartScraper,
+        "flipkart": FlipkartScraper,
+        "flipkart minutes": FlipkartMinutesScraper,
+        "amazon": AmazonScraper,
+        "amazon fresh": AmazonFreshScraper,
+        "jiomart": JioMartScraper,
+        "jiomart quick": JioMartQuickScraper,
+    }
+    
+    platform_key = request.platform.lower().strip()
+    scraper_class = platform_map.get(platform_key)
+    
+    if not scraper_class:
+        return {
+            "success": False,
+            "platform": request.platform,
+            "error": f"Unknown platform: {request.platform}",
+            "products": []
+        }
+    
+    try:
+        scraper = scraper_class(request.pincode)
+        results = await asyncio.wait_for(scraper.search(request.query), timeout=30.0)
+        products = [asdict(r) for r in results] if results else []
+        
+        # Cache successful results
+        if products:
+            cache.set(request.platform, request.query, request.pincode, products)
+        
+        return {
+            "success": True,
+            "platform": request.platform,
+            "query": request.query,
+            "products": products,
+            "count": len(products)
+        }
+    except asyncio.TimeoutError:
+        return {
+            "success": False,
+            "platform": request.platform,
+            "error": "Timeout - platform took too long to respond",
+            "products": []
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "platform": request.platform,
+            "error": str(e),
+            "products": []
+        }
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
