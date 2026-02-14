@@ -16,11 +16,15 @@ import os
 import json
 import asyncio
 import re
+import time
 from typing import List, Dict, Optional, Any
 import httpx
 
 # Import shared quota tracker from ai_service
 from .ai_service import _quota_tracker
+
+# Import analytics for logging AI processing
+from .analytics import AIProcessingLogRequest, log_ai_processing
 
 
 class AIScraper:
@@ -327,7 +331,8 @@ class AIScraper:
         html: str,
         platform: str,
         search_query: str,
-        base_url: str
+        base_url: str,
+        device_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Use AI to extract products from raw HTML.
@@ -338,6 +343,7 @@ class AIScraper:
             platform: Platform name (e.g., "Zepto", "Blinkit")
             search_query: What the user searched for
             base_url: Base URL for constructing product links
+            device_id: Device identifier for analytics tracking
             
         Returns:
             {
@@ -346,6 +352,9 @@ class AIScraper:
                 "confidence": 0.0-1.0
             }
         """
+        start_time = time.time()
+        input_html_size_kb = len(html) / 1024
+        
         if not self.is_available():
             return {
                 "products": [],
@@ -392,17 +401,60 @@ class AIScraper:
                 base_url
             )
             
+            latency_ms = int((time.time() - start_time) * 1000)
+            model_name = self.providers[provider_used]["model"]
+            
+            # Log AI processing analytics
+            if device_id:
+                try:
+                    log_ai_processing(AIProcessingLogRequest(
+                        device_id=device_id,
+                        search_query=search_query,
+                        platform=platform,
+                        ai_provider=provider_used,
+                        ai_model=model_name,
+                        input_html_size_kb=input_html_size_kb,
+                        products_found=len(products),
+                        products_filtered=len(products),  # All products are relevant at this stage
+                        latency_ms=latency_ms,
+                        success=True
+                    ))
+                except Exception as log_err:
+                    print(f"⚠️ Failed to log AI analytics: {log_err}")
+            
             return {
                 "products": products,
                 "extraction_method": "ai",
                 "provider": provider_used,
-                "model": self.providers[provider_used]["model"],
+                "model": model_name,
                 "confidence": result.get("confidence", 0.7),
                 "ai_powered": True,
-                "products_found": len(products)
+                "products_found": len(products),
+                "latency_ms": latency_ms
             }
             
         except Exception as e:
+            latency_ms = int((time.time() - start_time) * 1000)
+            
+            # Log failed AI processing
+            if device_id:
+                try:
+                    log_ai_processing(AIProcessingLogRequest(
+                        device_id=device_id,
+                        search_query=search_query,
+                        platform=platform,
+                        ai_provider="unknown",
+                        ai_model="unknown",
+                        input_html_size_kb=input_html_size_kb,
+                        products_found=0,
+                        products_filtered=0,
+                        latency_ms=latency_ms,
+                        fallback_reason=str(e),
+                        success=False
+                    ))
+                except Exception as log_err:
+                    print(f"⚠️ Failed to log AI analytics: {log_err}")
+            
             print(f"❌ AI extraction error for {platform}: {e}")
             return {
                 "products": [],
@@ -414,7 +466,8 @@ class AIScraper:
     async def extract_from_multiple_platforms(
         self,
         platform_html_list: List[Dict[str, str]],
-        search_query: str
+        search_query: str,
+        device_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Extract products from multiple platform HTMLs in parallel.
@@ -422,6 +475,7 @@ class AIScraper:
         Args:
             platform_html_list: List of {"platform": str, "html": str, "base_url": str}
             search_query: What the user searched for
+            device_id: Device identifier for analytics tracking
             
         Returns:
             {
@@ -438,7 +492,8 @@ class AIScraper:
                 html=item.get("html", ""),
                 platform=item.get("platform", "Unknown"),
                 search_query=search_query,
-                base_url=item.get("base_url", "")
+                base_url=item.get("base_url", ""),
+                device_id=device_id
             )
             tasks.append((item.get("platform"), task))
         

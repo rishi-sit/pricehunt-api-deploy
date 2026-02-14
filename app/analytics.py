@@ -52,7 +52,7 @@ def init_database():
     with get_db() as conn:
         cursor = conn.cursor()
         
-        # Main scrape logs table
+        # Main scrape logs table (from Android app)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS scrape_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,6 +72,27 @@ def init_database():
             )
         """)
         
+        # NEW: Backend AI processing logs (server-side analytics)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ai_processing_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT,
+                search_query TEXT NOT NULL,
+                endpoint TEXT NOT NULL,  -- 'ai-extract', 'smart-search', 'match-products'
+                ai_provider TEXT NOT NULL,  -- 'groq', 'mistral', 'gemini'
+                ai_model TEXT NOT NULL,  -- 'mixtral-8x7b', 'gemini-pro', etc.
+                fallback_reason TEXT,  -- why fallback was used
+                input_products INTEGER DEFAULT 0,
+                output_products INTEGER DEFAULT 0,
+                filtered_out INTEGER DEFAULT 0,
+                tokens_used INTEGER DEFAULT 0,
+                latency_ms INTEGER DEFAULT 0,
+                success BOOLEAN DEFAULT 1,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         # Create indexes for faster queries
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_device_date 
@@ -84,6 +105,14 @@ def init_database():
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_created_at 
             ON scrape_logs(created_at)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ai_logs_date 
+            ON ai_processing_logs(date(created_at))
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ai_logs_provider 
+            ON ai_processing_logs(ai_provider)
         """)
         
         # Summary table for quick dashboard queries
@@ -154,6 +183,37 @@ class ScrapeLogResponse(BaseModel):
     created_at: str
 
 
+class AIProcessingLogRequest(BaseModel):
+    """Request model for logging backend AI processing."""
+    device_id: Optional[str] = None
+    search_query: str
+    endpoint: str  # 'ai-extract', 'smart-search', 'match-products'
+    ai_provider: str  # 'groq', 'mistral', 'gemini'
+    ai_model: str  # 'mixtral-8x7b', 'gemini-pro', etc.
+    fallback_reason: Optional[str] = None
+    input_products: int = 0
+    output_products: int = 0
+    filtered_out: int = 0
+    tokens_used: int = 0
+    latency_ms: int = 0
+    success: bool = True
+    error_message: Optional[str] = None
+
+
+class AIProcessingStats(BaseModel):
+    """Statistics for AI processing."""
+    provider: str
+    model: str
+    total_requests: int
+    successful_requests: int
+    failed_requests: int
+    avg_latency_ms: int
+    total_input_products: int
+    total_output_products: int
+    total_filtered_out: int
+    total_tokens_used: int
+
+
 class PlatformStats(BaseModel):
     """Statistics for a single platform."""
     platform: str
@@ -180,6 +240,8 @@ class DashboardResponse(BaseModel):
     total_relevant_products: int
     ai_model_usage: Dict[str, int]
     scrape_source_breakdown: Dict[str, int]
+    # NEW: Backend AI processing stats
+    ai_processing_stats: Optional[List[AIProcessingStats]] = None
 
 
 class DashboardQueryRequest(BaseModel):
@@ -187,7 +249,6 @@ class DashboardQueryRequest(BaseModel):
     device_id: str
     start_date: Optional[str] = None  # YYYY-MM-DD
     end_date: Optional[str] = None    # YYYY-MM-DD
-
 
 class BulkLogRequest(BaseModel):
     """Request for logging multiple scrape events at once (batch)."""
@@ -439,6 +500,140 @@ def get_all_devices() -> List[Dict[str, Any]]:
             }
             for row in cursor.fetchall()
         ]
+
+
+def log_ai_processing(log: AIProcessingLogRequest) -> int:
+    """Log AI processing event from backend."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO ai_processing_logs (
+                device_id, search_query, platform, ai_provider, ai_model,
+                input_html_size_kb, products_found, products_filtered,
+                latency_ms, fallback_reason, success
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            log.device_id,
+            log.search_query,
+            log.platform,
+            log.ai_provider,
+            log.ai_model,
+            log.input_html_size_kb,
+            log.products_found,
+            log.products_filtered,
+            log.latency_ms,
+            log.fallback_reason,
+            log.success
+        ))
+        return cursor.lastrowid
+
+
+def get_ai_processing_stats(
+    device_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> Dict:
+    """Get AI processing statistics for a device."""
+    
+    if not start_date:
+        start_date = date.today().isoformat()
+    if not end_date:
+        end_date = date.today().isoformat()
+    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Get total AI processing stats
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_requests,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful,
+                SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failed,
+                AVG(latency_ms) as avg_latency_ms,
+                SUM(products_found) as total_products_found,
+                SUM(products_filtered) as total_products_filtered
+            FROM ai_processing_logs
+            WHERE device_id = ?
+              AND date(created_at) BETWEEN ? AND ?
+        """, (device_id, start_date, end_date))
+        
+        totals = cursor.fetchone()
+        
+        # Get stats by AI provider
+        cursor.execute("""
+            SELECT 
+                ai_provider,
+                ai_model,
+                COUNT(*) as requests,
+                AVG(latency_ms) as avg_latency_ms,
+                SUM(products_found) as products_found,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_count
+            FROM ai_processing_logs
+            WHERE device_id = ?
+              AND date(created_at) BETWEEN ? AND ?
+            GROUP BY ai_provider, ai_model
+        """, (device_id, start_date, end_date))
+        
+        provider_stats = [
+            {
+                "provider": row['ai_provider'],
+                "model": row['ai_model'],
+                "requests": row['requests'],
+                "avg_latency_ms": row['avg_latency_ms'],
+                "products_found": row['products_found'],
+                "success_rate": (row['success_count'] / row['requests'] * 100) if row['requests'] > 0 else 0
+            }
+            for row in cursor.fetchall()
+        ]
+        
+        # Get fallback reasons
+        cursor.execute("""
+            SELECT 
+                fallback_reason,
+                COUNT(*) as count
+            FROM ai_processing_logs
+            WHERE device_id = ?
+              AND date(created_at) BETWEEN ? AND ?
+              AND fallback_reason IS NOT NULL
+            GROUP BY fallback_reason
+        """, (device_id, start_date, end_date))
+        
+        fallback_reasons = [
+            {"reason": row['fallback_reason'], "count": row['count']}
+            for row in cursor.fetchall()
+        ]
+        
+        return {
+            "total_requests": totals['total_requests'] or 0,
+            "successful": totals['successful'] or 0,
+            "failed": totals['failed'] or 0,
+            "avg_latency_ms": round(totals['avg_latency_ms'] or 0, 2),
+            "total_products_found": totals['total_products_found'] or 0,
+            "total_products_filtered": totals['total_products_filtered'] or 0,
+            "provider_stats": provider_stats,
+            "fallback_reasons": fallback_reasons
+        }
+
+
+def get_combined_dashboard(
+    device_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> Dict:
+    """Get combined analytics dashboard with both scrape logs and AI processing stats."""
+    
+    scrape_dashboard = get_dashboard_data(device_id, start_date, end_date)
+    ai_stats = get_ai_processing_stats(device_id, start_date, end_date)
+    
+    return {
+        "device_id": device_id,
+        "date_range": {
+            "start_date": start_date or date.today().isoformat(),
+            "end_date": end_date or date.today().isoformat()
+        },
+        "scrape_stats": scrape_dashboard.dict() if hasattr(scrape_dashboard, 'dict') else scrape_dashboard,
+        "ai_processing_stats": ai_stats
+    }
 
 
 # Initialize database on module import

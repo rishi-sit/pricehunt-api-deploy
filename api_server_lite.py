@@ -77,12 +77,14 @@ class AIExtractRequest(BaseModel):
     platform: str
     search_query: str
     base_url: str
+    device_id: Optional[str] = None  # For analytics tracking
 
 
 class MultiPlatformExtractRequest(BaseModel):
     """Request for extracting from multiple platform HTMLs"""
     platforms: List[Dict[str, str]]  # [{"platform": str, "html": str, "base_url": str}]
     search_query: str
+    device_id: Optional[str] = None  # For analytics tracking
 
 
 # ============== API Endpoints ==============
@@ -596,7 +598,8 @@ async def ai_extract_products(request: AIExtractRequest):
             html=request.html,
             platform=request.platform,
             search_query=request.search_query,
-            base_url=request.base_url
+            base_url=request.base_url,
+            device_id=request.device_id
         )
         
         extracted_products = result.get("products", [])
@@ -686,7 +689,8 @@ async def ai_extract_multi_platform(request: MultiPlatformExtractRequest):
         
         result = await ai_scraper.extract_from_multiple_platforms(
             platform_html_list=request.platforms,
-            search_query=request.search_query
+            search_query=request.search_query,
+            device_id=request.device_id
         )
         
         return {
@@ -723,7 +727,8 @@ async def smart_extract_and_filter(request: MultiPlatformExtractRequest):
         # Step 1: Extract from all platforms
         extraction_result = await ai_scraper.extract_from_multiple_platforms(
             platform_html_list=request.platforms,
-            search_query=request.search_query
+            search_query=request.search_query,
+            device_id=request.device_id
         )
         
         # Collect all extracted products
@@ -969,8 +974,10 @@ if __name__ == "__main__":
 
 from app.analytics import (
     ScrapeLogRequest, BulkLogRequest, DashboardQueryRequest,
+    AIProcessingLogRequest,
     log_scrape_event, log_bulk_events, get_dashboard_data,
-    get_recent_logs, get_all_devices
+    get_recent_logs, get_all_devices, log_ai_processing,
+    get_ai_processing_stats, get_combined_dashboard
 )
 
 
@@ -1115,6 +1122,90 @@ async def list_all_devices():
             "success": True,
             "devices": devices,
             "count": len(devices)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/api/analytics/ai-processing")
+async def log_ai_processing_event(log: AIProcessingLogRequest):
+    """
+    Log AI processing event from backend.
+    
+    Called internally when AI service processes HTML for product extraction.
+    Tracks:
+    - ai_provider: Provider used (groq, gemini, mistral)
+    - ai_model: Model used (mixtral-8x7b, gemini-flash, etc.)
+    - input_html_size_kb: Size of input HTML
+    - products_found: Products extracted
+    - products_filtered: Relevant products after filtering
+    - latency_ms: Processing time
+    - fallback_reason: Why fallback was used (if applicable)
+    """
+    try:
+        log_id = log_ai_processing(log)
+        return {
+            "success": True,
+            "log_id": log_id,
+            "message": "AI processing logged successfully"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/analytics/ai-stats/{device_id}")
+async def get_ai_stats(
+    device_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """
+    Get AI processing statistics for a device.
+    
+    Returns:
+    - Total AI requests
+    - Success/failure counts
+    - Average latency
+    - Provider breakdown (Groq vs Gemini vs Mistral)
+    - Fallback reasons
+    """
+    try:
+        stats = get_ai_processing_stats(device_id, start_date, end_date)
+        return {
+            "success": True,
+            "data": stats
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/analytics/combined/{device_id}")
+async def get_combined_analytics(
+    device_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """
+    Get combined analytics dashboard with both scrape logs and AI processing stats.
+    
+    This is the UNIFIED dashboard that combines:
+    - Android scrape metrics (device vs server, HTML sizes, product counts)
+    - Backend AI processing metrics (models used, latency, success rates)
+    """
+    try:
+        combined = get_combined_dashboard(device_id, start_date, end_date)
+        return {
+            "success": True,
+            "data": combined
         }
     except Exception as e:
         return {
