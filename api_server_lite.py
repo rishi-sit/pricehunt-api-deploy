@@ -979,7 +979,12 @@ from app.analytics import (
     AIProcessingLogRequest,
     log_scrape_event, log_bulk_events, get_dashboard_data,
     get_recent_logs, get_all_devices, log_ai_processing,
-    get_ai_processing_stats, get_combined_dashboard, get_ai_quota_stats
+    get_ai_processing_stats, get_combined_dashboard, get_ai_quota_stats,
+    # NEW: Session-based analytics
+    CreateSessionRequest, UpdateSessionRequest, PlatformScrapeEventRequest,
+    AIProcessingEventRequest, create_session, update_session,
+    log_platform_scrape_event, log_ai_processing_event, get_session_detail,
+    get_device_sessions, get_session_pipeline_visualization
 )
 
 
@@ -1246,6 +1251,138 @@ async def get_combined_analytics(
 
 
 # ============================================================================
+# Session-Based Pipeline Analytics (NEW)
+# ============================================================================
+
+@app.post("/api/analytics/session/create")
+async def create_search_session(request: CreateSessionRequest):
+    """
+    Create a new search session.
+    
+    Call this when a search starts on Android. Generate a UUID for session_id.
+    All subsequent events (platform scrapes, AI calls) should include this session_id.
+    """
+    try:
+        session_id = create_session(request)
+        return {
+            "success": True,
+            "session_id": session_id,
+            "message": "Session created"
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/analytics/session/update")
+async def update_search_session(request: UpdateSessionRequest):
+    """
+    Update session with final results after search completes.
+    
+    Include summary stats: total products, best deal, latency, etc.
+    """
+    try:
+        updated = update_session(request)
+        return {
+            "success": True,
+            "updated": updated,
+            "message": "Session updated"
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/analytics/session/platform-event")
+async def log_platform_event(request: PlatformScrapeEventRequest):
+    """
+    Log a platform scrape event within a session.
+    
+    Call this after scraping each platform (Zepto, Blinkit, etc.)
+    """
+    try:
+        event_id = log_platform_scrape_event(request)
+        return {
+            "success": True,
+            "event_id": event_id,
+            "message": "Platform event logged"
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/analytics/session/ai-event")
+async def log_ai_event(request: AIProcessingEventRequest):
+    """
+    Log an AI processing event within a session.
+    
+    Call this after each AI call (extraction, filtering, matching).
+    """
+    try:
+        event_id = log_ai_processing_event(request)
+        return {
+            "success": True,
+            "event_id": event_id,
+            "message": "AI event logged"
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/analytics/session/{session_id}")
+async def get_session(session_id: str):
+    """
+    Get full session detail with all platform and AI events.
+    
+    Returns the complete journey of a single search.
+    """
+    try:
+        detail = get_session_detail(session_id)
+        if not detail:
+            return {"success": False, "error": "Session not found"}
+        return {"success": True, "data": detail}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/analytics/session/{session_id}/pipeline")
+async def get_session_pipeline(session_id: str):
+    """
+    Get session data formatted for pipeline visualization.
+    
+    Returns stages: Scraping → AI Extraction → Filtering → Matching → Best Deal
+    """
+    try:
+        pipeline = get_session_pipeline_visualization(session_id)
+        if "error" in pipeline:
+            return {"success": False, "error": pipeline["error"]}
+        return {"success": True, "data": pipeline}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/analytics/sessions/{device_id}")
+async def get_sessions_for_device(
+    device_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 50
+):
+    """
+    Get recent sessions for a device.
+    
+    Returns list of sessions with summary info.
+    """
+    try:
+        sessions = get_device_sessions(device_id, start_date, end_date, limit)
+        return {
+            "success": True,
+            "sessions": sessions,
+            "count": len(sessions)
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ============================================================================
 # Analytics Dashboard UI
 # ============================================================================
 
@@ -1280,5 +1417,35 @@ async def analytics_dashboard():
     except Exception as e:
         return HTMLResponse(
             content=f"<h1>Error loading dashboard</h1><p>{str(e)}</p>",
+            status_code=500
+        )
+
+
+@app.get("/session", response_class=HTMLResponse)
+async def session_pipeline_view():
+    """
+    Serve the Session Pipeline Visualization UI.
+    
+    Access at: https://pricehunt-hklm.onrender.com/session?id=<session_id>
+    
+    Shows the complete end-to-end journey of a single search:
+    - Stage 1: Platform scraping (device/AI/Playwright per platform)
+    - Stage 2: AI extraction calls
+    - Stage 3: AI filtering
+    - Stage 4: Product matching and best deal
+    """
+    try:
+        template_path = Path(__file__).parent / "app" / "templates" / "session.html"
+        if not template_path.exists():
+            return HTMLResponse(
+                content="<h1>Session template not found</h1>",
+                status_code=404
+            )
+        with open(template_path, "r") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        return HTMLResponse(
+            content=f"<h1>Error loading session view</h1><p>{str(e)}</p>",
             status_code=500
         )

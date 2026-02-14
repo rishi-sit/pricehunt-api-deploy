@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Session Pipeline - PriceHunt</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .pipeline-line { 
+            position: absolute; 
+            left: 50%; 
+            top: 0; 
+            bottom: 0; 
+            width: 4px; 
+            background: linear-gradient(to bottom, #667eea, #764ba2);
+            transform: translateX(-50%);
+        }
+        .pipeline-dot {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: white;
+            border: 4px solid #667eea;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+        }
+        .pipeline-dot.success { border-color: #10B981; background: #D1FAE5; }
+        .pipeline-dot.failed { border-color: #EF4444; background: #FEE2E2; }
+        .pipeline-dot.pending { border-color: #6B7280; background: #F3F4F6; }
+        .stage-card { transition: all 0.3s ease; }
+        .stage-card:hover { transform: translateY(-2px); box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <!-- Header -->
+    <header class="gradient-bg text-white py-4 px-8 shadow-lg">
+        <div class="max-w-6xl mx-auto flex justify-between items-center">
+            <div>
+                <a href="/dashboard" class="text-purple-200 text-sm hover:text-white">← Back to Dashboard</a>
+                <h1 class="text-xl font-bold">🔍 Search Session Pipeline</h1>
+            </div>
+            <div id="sessionStatus" class="px-3 py-1 rounded-full text-sm bg-white/20">
+                Loading...
+            </div>
+        </div>
+    </header>
+
+    <!-- Session Header -->
+    <div class="max-w-6xl mx-auto px-8 py-6">
+        <div id="sessionHeader" class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-gray-500 text-sm">Search Query</p>
+                    <h2 id="searchQuery" class="text-2xl font-bold text-gray-800">-</h2>
+                </div>
+                <div class="text-right">
+                    <p class="text-gray-500 text-sm">Total Time</p>
+                    <p id="totalLatency" class="text-2xl font-bold text-purple-600">-</p>
+                </div>
+            </div>
+            <div class="grid grid-cols-4 gap-4 mt-4 pt-4 border-t">
+                <div>
+                    <p class="text-gray-500 text-xs">Device ID</p>
+                    <p id="deviceId" class="font-mono text-sm truncate">-</p>
+                </div>
+                <div>
+                    <p class="text-gray-500 text-xs">Pincode</p>
+                    <p id="pincode" class="font-medium">-</p>
+                </div>
+                <div>
+                    <p class="text-gray-500 text-xs">Started At</p>
+                    <p id="startedAt" class="text-sm">-</p>
+                </div>
+                <div>
+                    <p class="text-gray-500 text-xs">Session ID</p>
+                    <p id="sessionId" class="font-mono text-xs truncate">-</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pipeline Visualization -->
+        <div class="relative">
+            <!-- Stage 1: Platform Scraping -->
+            <div class="stage-card bg-white rounded-xl shadow-lg p-6 mb-6 relative">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-lg">📡</div>
+                    <div>
+                        <h3 class="font-semibold text-gray-800">Stage 1: Platform Scraping</h3>
+                        <p id="stage1Summary" class="text-sm text-gray-500">Loading...</p>
+                    </div>
+                </div>
+                <div id="platformsGrid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                    <div class="text-center text-gray-400 col-span-full py-4">Loading platforms...</div>
+                </div>
+            </div>
+
+            <!-- Stage 2: AI Extraction -->
+            <div class="stage-card bg-white rounded-xl shadow-lg p-6 mb-6">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-lg">🤖</div>
+                    <div>
+                        <h3 class="font-semibold text-gray-800">Stage 2: AI Product Extraction</h3>
+                        <p id="stage2Summary" class="text-sm text-gray-500">For platforms using AI fallback</p>
+                    </div>
+                </div>
+                <div id="aiExtractionGrid" class="space-y-2">
+                    <div class="text-center text-gray-400 py-4">No AI extraction calls</div>
+                </div>
+            </div>
+
+            <!-- Stage 3: AI Filtering -->
+            <div class="stage-card bg-white rounded-xl shadow-lg p-6 mb-6">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-lg">🎯</div>
+                    <div>
+                        <h3 class="font-semibold text-gray-800">Stage 3: AI Filtering (Smart Search)</h3>
+                        <p id="stage3Summary" class="text-sm text-gray-500">Filter relevant products</p>
+                    </div>
+                </div>
+                <div id="aiFilteringGrid" class="space-y-2">
+                    <div class="text-center text-gray-400 py-4">No filtering calls</div>
+                </div>
+            </div>
+
+            <!-- Stage 4: Product Matching -->
+            <div class="stage-card bg-white rounded-xl shadow-lg p-6 mb-6">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-lg">🏆</div>
+                    <div>
+                        <h3 class="font-semibold text-gray-800">Stage 4: Product Matching & Best Deal</h3>
+                        <p id="stage4Summary" class="text-sm text-gray-500">Find the best price</p>
+                    </div>
+                </div>
+                <div id="aiMatchingGrid" class="space-y-2">
+                    <div class="text-center text-gray-400 py-4">No matching calls</div>
+                </div>
+            </div>
+
+            <!-- Summary -->
+            <div id="summaryCard" class="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl shadow-lg p-6 text-white">
+                <h3 class="font-semibold mb-4">📊 Pipeline Summary</h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="bg-white/20 rounded-lg p-3">
+                        <p class="text-purple-200 text-xs">Total Products</p>
+                        <p id="summaryProducts" class="text-2xl font-bold">-</p>
+                    </div>
+                    <div class="bg-white/20 rounded-lg p-3">
+                        <p class="text-purple-200 text-xs">Relevant</p>
+                        <p id="summaryRelevant" class="text-2xl font-bold">-</p>
+                    </div>
+                    <div class="bg-white/20 rounded-lg p-3">
+                        <p class="text-purple-200 text-xs">AI Calls</p>
+                        <p id="summaryAICalls" class="text-2xl font-bold">-</p>
+                    </div>
+                    <div class="bg-white/20 rounded-lg p-3">
+                        <p class="text-purple-200 text-xs">Best Deal</p>
+                        <p id="summaryBestDeal" class="text-lg font-bold truncate">-</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- No Session State -->
+    <div id="noSessionState" class="max-w-6xl mx-auto px-8 py-20 text-center hidden">
+        <div class="text-6xl mb-4">🔍</div>
+        <h2 class="text-xl font-semibold text-gray-700 mb-2">No Session Selected</h2>
+        <p class="text-gray-500 mb-4">Enter a session ID or select from device sessions</p>
+        <div class="max-w-md mx-auto flex gap-2">
+            <input type="text" id="sessionInput" placeholder="Enter session ID..." 
+                   class="flex-1 border rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 focus:outline-none">
+            <button onclick="loadSession()" class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">
+                Load
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        let currentSessionId = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionId = urlParams.get('id');
+            if (sessionId) {
+                currentSessionId = sessionId;
+                loadSessionPipeline(sessionId);
+            } else {
+                showNoSession();
+            }
+        });
+
+        function loadSession() {
+            const sessionId = document.getElementById('sessionInput').value.trim();
+            if (sessionId) {
+                window.location.href = `/session?id=${sessionId}`;
+            }
+        }
+
+        async function loadSessionPipeline(sessionId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/analytics/session/${sessionId}/pipeline`);
+                const data = await response.json();
+                
+                if (!data.success) {
+                    showNoSession();
+                    return;
+                }
+
+                renderPipeline(data.data);
+            } catch (error) {
+                console.error('Failed to load session:', error);
+                showNoSession();
+            }
+        }
+
+        function renderPipeline(data) {
+            // Hide no session state
+            document.getElementById('noSessionState').classList.add('hidden');
+            
+            // Session header
+            const session = data.session;
+            document.getElementById('searchQuery').textContent = `"${session.query}"`;
+            document.getElementById('totalLatency').textContent = `${(session.total_latency_ms / 1000).toFixed(1)}s`;
+            document.getElementById('deviceId').textContent = session.device_id;
+            document.getElementById('pincode').textContent = session.pincode || '-';
+            document.getElementById('startedAt').textContent = new Date(session.started_at).toLocaleString();
+            document.getElementById('sessionId').textContent = session.session_id;
+            
+            // Status badge
+            const statusEl = document.getElementById('sessionStatus');
+            const statusColors = {
+                'completed': 'bg-green-500',
+                'failed': 'bg-red-500',
+                'timeout': 'bg-yellow-500',
+                'in_progress': 'bg-blue-500'
+            };
+            statusEl.className = `px-3 py-1 rounded-full text-sm ${statusColors[session.status] || 'bg-gray-500'}`;
+            statusEl.textContent = session.status.toUpperCase();
+
+            // Stage 1: Platforms
+            const stage1 = data.stage_1_scraping;
+            document.getElementById('stage1Summary').textContent = 
+                `${stage1.successful}/${stage1.total_platforms} platforms successful`;
+            
+            const platformsHtml = stage1.platforms.map(p => {
+                const sourceColors = {
+                    'device': 'border-green-500 bg-green-50',
+                    'ai_fallback': 'border-purple-500 bg-purple-50',
+                    'playwright': 'border-yellow-500 bg-yellow-50',
+                    'cache': 'border-gray-500 bg-gray-50'
+                };
+                const sourceLabels = {
+                    'device': '📱 Device',
+                    'ai_fallback': '🤖 AI',
+                    'playwright': '🎭 Playwright',
+                    'cache': '💾 Cache'
+                };
+                return `
+                    <div class="border-2 rounded-lg p-3 ${p.success ? sourceColors[p.source] : 'border-red-500 bg-red-50'}">
+                        <div class="font-medium text-sm truncate">${p.platform}</div>
+                        <div class="text-xs text-gray-500">${sourceLabels[p.source] || p.source}</div>
+                        <div class="flex justify-between mt-2 text-xs">
+                            <span>${p.products_found} products</span>
+                            <span>${p.latency_ms}ms</span>
+                        </div>
+                        ${p.retry_count > 0 ? `<div class="text-xs text-orange-600 mt-1">🔄 ${p.retry_count} retries</div>` : ''}
+                        ${!p.success ? `<div class="text-xs text-red-600 mt-1 truncate">❌ ${p.error || 'Failed'}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+            document.getElementById('platformsGrid').innerHTML = platformsHtml || '<div class="text-center text-gray-400 col-span-full py-4">No platforms</div>';
+
+            // Stage 2: AI Extraction
+            const stage2 = data.stage_2_ai_extraction;
+            document.getElementById('stage2Summary').textContent = `${stage2.calls.length} AI extraction calls`;
+            document.getElementById('aiExtractionGrid').innerHTML = renderAICalls(stage2.calls) || 
+                '<div class="text-center text-gray-400 py-4">No AI extraction (all platforms used device scraping)</div>';
+
+            // Stage 3: AI Filtering
+            const stage3 = data.stage_3_filtering;
+            document.getElementById('stage3Summary').textContent = `${stage3.calls.length} filtering calls`;
+            document.getElementById('aiFilteringGrid').innerHTML = renderAICalls(stage3.calls) ||
+                '<div class="text-center text-gray-400 py-4">No filtering calls</div>';
+
+            // Stage 4: AI Matching
+            const stage4 = data.stage_4_matching;
+            document.getElementById('stage4Summary').textContent = `${stage4.calls.length} matching calls`;
+            document.getElementById('aiMatchingGrid').innerHTML = renderAICalls(stage4.calls) ||
+                '<div class="text-center text-gray-400 py-4">No matching calls</div>';
+
+            // Summary
+            const summary = data.summary;
+            document.getElementById('summaryProducts').textContent = summary.total_products_found;
+            document.getElementById('summaryRelevant').textContent = summary.relevant_products;
+            document.getElementById('summaryAICalls').textContent = summary.total_ai_calls;
+            if (summary.best_deal) {
+                document.getElementById('summaryBestDeal').textContent = 
+                    `₹${summary.best_deal.price} on ${summary.best_deal.platform}`;
+            } else {
+                document.getElementById('summaryBestDeal').textContent = 'N/A';
+            }
+        }
+
+        function renderAICalls(calls) {
+            if (!calls || calls.length === 0) return '';
+            
+            return calls.map(call => {
+                const providerColors = {
+                    'groq': 'bg-blue-100 text-blue-800',
+                    'gemini': 'bg-green-100 text-green-800',
+                    'mistral': 'bg-orange-100 text-orange-800'
+                };
+                return `
+                    <div class="flex items-center justify-between bg-gray-50 rounded-lg p-3 ${!call.success ? 'border-l-4 border-red-500' : ''}">
+                        <div class="flex items-center gap-3">
+                            ${call.platform ? `<span class="font-medium">${call.platform}</span>` : ''}
+                            <span class="px-2 py-0.5 rounded text-xs ${providerColors[call.provider] || 'bg-gray-100'}">
+                                ${call.provider}/${call.model}
+                            </span>
+                            ${call.is_fallback ? '<span class="px-2 py-0.5 rounded text-xs bg-yellow-100 text-yellow-800">Fallback</span>' : ''}
+                        </div>
+                        <div class="flex items-center gap-4 text-sm text-gray-500">
+                            <span>${call.products_input} → ${call.products_output}</span>
+                            <span>${call.latency_ms}ms</span>
+                            ${call.success ? '<span class="text-green-500">✓</span>' : '<span class="text-red-500">✗</span>'}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function showNoSession() {
+            document.getElementById('sessionHeader').classList.add('hidden');
+            document.querySelectorAll('.stage-card').forEach(el => el.classList.add('hidden'));
+            document.getElementById('summaryCard').classList.add('hidden');
+            document.getElementById('noSessionState').classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
