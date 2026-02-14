@@ -1529,34 +1529,112 @@ JSON only, no explanation:"""
         # Multi-word queries need ALL words to match
         if is_multi_word:
             threshold = 75  # Increased from 60 - ALL words must match
-        elif query_lower in ["milk", "rice", "oil", "sugar", "salt", "flour", "wheat", "banana", "apple", "onion", "potato", "tomato", "strawberry", "mango", "orange", "grapes", "chicken", "eggs", "bread"]:
-            threshold = 80  # Higher threshold for common items with many flavored/processed variants
+        elif query_lower in ["milk", "rice", "oil", "sugar", "salt", "flour", "wheat", "banana", "apple", "onion", "potato", "tomato", "strawberry", "mango", "orange", "grapes", "grape", "chicken", "eggs", "bread"]:
+            threshold = 85  # Higher threshold for common items with many flavored/processed variants
         else:
-            threshold = 70  # Increased from 60 - better filtering for single words
+            threshold = 75  # Increased - better filtering for single words
 
-        # Special handling for "milk" - has many derivatives that should be excluded
-        milk_note = ""
+        # Build special notes for problem queries
+        special_notes = ""
+        
+        # MILK - has many brand/derivative traps
         if query_lower == "milk":
-            milk_note = """
-CRITICAL: User searched for "milk" (the dairy product).
-EXCLUDE these derivatives (score 0-30):
-- Milk chocolate, chocolate milk, milkshake, milk powder, condensed milk
-- Milk-based products like milk cake, milk bread (unless specifically milk as ingredient)
-- Products with "milk" in brand name but not the actual product (e.g., "Dairy Milk" chocolate)
-- Milk-based beverages, shakes, smoothies
+            special_notes = """
+CRITICAL: User searched for "milk" (liquid dairy milk).
+EXCLUDE these (score 0-30):
+- "Dairy Milk" (Cadbury chocolate brand) - score 0
+- "Milk Bikis" (biscuit brand) - score 0  
+- "Milkmaid" (condensed milk brand) - score 20
+- Milkshake, chocolate milk, flavored milk - score 15
+- Milk powder, milk cake, milk bread - score 10
 
-INCLUDE only (score 75-100):
-- Actual milk products: "Amul Milk", "Toned Milk", "Full Cream Milk", "Double Toned Milk"
-- Milk variants: "Skimmed Milk", "Organic Milk", "A2 Milk", "Cow Milk", "Buffalo Milk"
-- Must be liquid milk, not processed/derived products
+INCLUDE only (score 85-100):
+- Actual liquid milk: "Amul Milk", "Toned Milk", "Full Cream Milk", "Double Toned Milk"
+- Must be LIQUID MILK, not chocolate/biscuit/condensed/powder
 
 Examples:
-- "Amul Full Cream Milk 500ml" = 95 ✓ (IS milk)
-- "Mother Dairy Double Toned Milk 1L" = 95 ✓ (IS milk)
-- "Cadbury Dairy Milk Chocolate" = 15 ✗ (chocolate, not milk)
-- "Nestle Milkmaid Condensed Milk" = 20 ✗ (condensed milk, not regular milk)
-- "Amul Milkshake" = 10 ✗ (beverage, not milk)
-- "Amul Milk Chocolate" = 5 ✗ (chocolate, not milk)
+- "Amul Taaza Toned Milk 500ml" = 95 ✓
+- "Nandini Milk 500ml" = 95 ✓
+- "Cadbury Dairy Milk Chocolate" = 0 ✗ (chocolate)
+- "Milk Bikis Biscuit" = 0 ✗ (biscuit)
+- "Milkmaid Condensed Milk" = 15 ✗ (condensed)
+- "Nestle Milkshake" = 10 ✗ (milkshake)
+"""
+
+        # APPLE - pineapple trap + electronics
+        elif query_lower == "apple":
+            special_notes = """
+CRITICAL: User searched for "apple" (the fruit).
+COMPOUND WORD TRAP: "pineapple" is a DIFFERENT fruit - EXCLUDE IT (score 0)!
+Also exclude Apple electronics (iPhone, iPad, AirPods, etc.)
+
+EXCLUDE (score 0-20):
+- "Pineapple" (different fruit) - score 0
+- "Apple iPhone/iPad/AirPods/Watch" (electronics) - score 0
+- "Apple Juice/Cider" (processed) - score 15
+- "Apple Vinegar" (processed) - score 10
+
+INCLUDE only (score 85-100):
+- Fresh apple fruit: "Apple", "Shimla Apple", "Washington Apple", "Green Apple", "Red Apple"
+- Must be the FRUIT, not juice/vinegar/electronics
+
+Examples:
+- "Fresh Apple Red Delicious 1kg" = 95 ✓
+- "Shimla Apple Premium" = 95 ✓
+- "Pineapple Fresh 1kg" = 0 ✗ (different fruit!)
+- "Apple iPhone 15 Case" = 0 ✗ (electronics)
+- "Real Apple Juice" = 15 ✗ (processed)
+"""
+
+        # GRAPE - grapefruit/grapeseed trap
+        elif query_lower in ["grape", "grapes"]:
+            special_notes = """
+CRITICAL: User searched for "grape" (the fruit).
+COMPOUND WORD TRAPS: 
+- "grapefruit" is a DIFFERENT citrus fruit - EXCLUDE (score 0)
+- "grapeseed" is oil from grape seeds - EXCLUDE (score 10)
+
+EXCLUDE (score 0-20):
+- "Grapefruit" (different fruit) - score 0
+- "Grapeseed Oil" (oil product) - score 10
+- "Grape Juice" (processed) - score 15
+- "Grape Wine" (alcohol) - score 5
+
+INCLUDE only (score 85-100):
+- Fresh grapes: "Grapes", "Green Grapes", "Red Grapes", "Black Grapes", "Seedless Grapes"
+- Must be the FRUIT, not juice/wine/oil
+
+Examples:
+- "Fresh Grapes Green 500g" = 95 ✓
+- "Red Grapes Seedless" = 95 ✓
+- "Grapefruit Fresh" = 0 ✗ (different fruit!)
+- "Grapeseed Oil" = 5 ✗ (oil product)
+- "Grape Juice" = 15 ✗ (processed)
+"""
+
+        # STRAWBERRY - processed products
+        elif query_lower == "strawberry":
+            special_notes = """
+CRITICAL: User searched for "strawberry" (the fruit).
+Include ALL fresh strawberry products even with different names.
+
+EXCLUDE (score 0-30):
+- "Strawberry Shake/Smoothie" - score 15
+- "Strawberry Jam/Jelly" - score 20
+- "Strawberry Ice Cream" - score 15
+- "Strawberry Flavoured" anything - score 10
+
+INCLUDE (score 85-100):
+- Fresh strawberries: "Strawberry", "Strawberries", "Fresh Strawberry"
+- Premium/Organic variants: "Driscoll's Strawberries", "Premium Strawberries"
+
+Examples:
+- "Fresh Strawberry 200g" = 95 ✓
+- "Fresh Strawberries Premium 250g" = 95 ✓
+- "Driscoll's Strawberries 454g" = 95 ✓ (IS fresh strawberry)
+- "American Strawberry 200g Pack" = 95 ✓
+- "Strawberry Shake" = 15 ✗ (beverage)
+- "Strawberry Jam" = 20 ✗ (processed)
 """
 
         multi_word_note = ""
@@ -1594,6 +1672,7 @@ REMEMBER: For multi-word queries, be STRICT. Missing even ONE key word means the
 
 Products to score: {products_json}
 {milk_note}
+{special_notes}
 {multi_word_note}
 
 SCORING GUIDELINES FOR "{query}":

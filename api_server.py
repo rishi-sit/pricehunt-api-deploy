@@ -470,19 +470,143 @@ async def health_check():
 @app.get("/api/gemini-ping")
 async def gemini_ping():
     """Quick connectivity test for Gemini API."""
+    gemini = get_gemini_service()
     return await gemini.ping()
 
 
 @app.get("/api/gemini-models")
 async def gemini_models():
     """List available Gemini models for this API key."""
+    gemini = get_gemini_service()
     return await gemini.list_models()
 
 
 @app.get("/api/groq-ping")
 async def groq_ping():
     """Quick connectivity test for Groq (no fallback)."""
+    gemini = get_gemini_service()
     return await gemini.ping_provider("groq")
+
+
+@app.get("/api/quota-stats")
+async def quota_stats():
+    """Get current AI quota statistics for all providers."""
+    ai_service = get_gemini_service()
+    return ai_service.get_quota_stats()
+
+
+@app.post("/api/reset-quota")
+async def reset_quota():
+    """Force reset AI quota tracking (for testing/debugging)."""
+    ai_service = get_gemini_service()
+    return ai_service.force_reset_quota()
+
+
+@app.get("/api/ping-provider/{provider}")
+async def ping_provider(provider: str):
+    """Test connectivity to a specific AI provider."""
+    ai_service = get_gemini_service()
+    return await ai_service.ping_provider(provider)
+
+
+class SmartSearchWithProviderRequest(BaseModel):
+    """Request for smart search with specific provider/model"""
+    query: str
+    products: List[ProductInput] = []
+    pincode: Optional[str] = "560001"
+    strict_mode: bool = True
+    provider: Optional[str] = None  # groq, gemini, mistral, etc.
+    model: Optional[str] = None  # specific model override
+    platform_results: Optional[Dict[str, List[ProductInput]]] = None
+
+
+@app.post("/api/smart-search-with-provider")
+async def smart_search_with_provider(request: SmartSearchWithProviderRequest):
+    """
+    AI-powered smart search with explicit provider/model selection.
+    
+    Use this to test specific AI models and compare their performance.
+    No fallback - if the specified provider fails, returns error.
+    
+    Available providers: gemini, groq, mistral, cerebras, together, openrouter
+    
+    Example models:
+    - gemini: gemini-2.5-flash, gemini-2.5-flash-lite, gemma-3-27b-it
+    - groq: llama-3.3-70b-versatile, mixtral-8x7b-32768
+    - mistral: mistral-small-latest
+    """
+    ai_service = get_gemini_service()
+    start_time = time.monotonic()
+    
+    # Convert products
+    platform_results = request.platform_results or {}
+    if platform_results:
+        limited_platform_results = {
+            platform: items[:MAX_PLATFORM_ITEMS]
+            for platform, items in platform_results.items()
+        }
+        products = [
+            p.model_dump()
+            for platform_products in limited_platform_results.values()
+            for p in platform_products
+        ]
+    else:
+        products = [p.model_dump() for p in request.products]
+    
+    filter_start = time.monotonic()
+    result = await ai_service.filter_relevant_products_with_provider(
+        query=request.query,
+        products=products,
+        strict_mode=request.strict_mode,
+        provider=request.provider,
+        model=request.model
+    )
+    filter_ms = int((time.monotonic() - filter_start) * 1000)
+    total_ms = int((time.monotonic() - start_time) * 1000)
+    
+    # Find best deal from relevant products
+    relevant_products = result.get("relevant_products", [])
+    best_deal = None
+    if relevant_products:
+        available = [p for p in relevant_products if p.get("available", True) and p.get("price", 0) > 0]
+        high_relevance = [p for p in available if p.get("relevance_score", 0) >= 70]
+        candidates = high_relevance if high_relevance else available
+        if candidates:
+            best = min(candidates, key=lambda x: x.get("price", float("inf")))
+            best_deal = {
+                "name": best.get("name"),
+                "price": best.get("price"),
+                "platform": best.get("platform"),
+                "relevance_score": best.get("relevance_score", 50)
+            }
+    
+    platform_counts = {
+        platform: len(items) for platform, items in limited_platform_results.items()
+    } if platform_results else {}
+
+    return {
+        "query": request.query,
+        "pincode": request.pincode,
+        "provider": request.provider,
+        "model": request.model,
+        "ai_powered": result.get("ai_powered", False),
+        "ai_meta": result.get("ai_meta"),
+        "query_understanding": result.get("query_understanding", {}),
+        "relevant_products": relevant_products,
+        "filtered_out": result.get("filtered_out", []),
+        "best_deal": best_deal,
+        "error": result.get("error"),
+        "timing_ms": {
+            "total": total_ms,
+            "filter": filter_ms
+        },
+        "stats": {
+            "total_input": len(products),
+            "total_relevant": len(relevant_products),
+            "total_filtered": len(result.get("filtered_out", [])),
+            "platform_counts": platform_counts
+        }
+    }
 
 
 if __name__ == "__main__":

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PriceHunt AI Accuracy Test Suite</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+        h1 { color: #333; }
+        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+        .stat { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; text-align: center; }
+        .stat-value { font-size: 32px; font-weight: bold; }
+        .stat-label { font-size: 12px; opacity: 0.9; }
+        .test-result { border-left: 4px solid #ddd; padding: 10px 15px; margin: 10px 0; background: #fafafa; }
+        .test-result.pass { border-color: #22c55e; }
+        .test-result.fail { border-color: #ef4444; }
+        .test-result.partial { border-color: #f59e0b; }
+        button { background: #4f46e5; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 16px; margin: 5px; }
+        button:hover { background: #4338ca; }
+        button:disabled { background: #9ca3af; cursor: not-allowed; }
+        .progress { background: #e5e7eb; border-radius: 4px; height: 8px; overflow: hidden; }
+        .progress-bar { background: #4f46e5; height: 100%; transition: width 0.3s; }
+        pre { background: #1f2937; color: #f3f4f6; padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; }
+        .badge-green { background: #dcfce7; color: #166534; }
+        .badge-red { background: #fee2e2; color: #991b1b; }
+        .badge-yellow { background: #fef9c3; color: #854d0e; }
+        table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        th { background: #f9fafb; font-weight: 600; }
+        .score { font-weight: bold; }
+        .score.high { color: #16a34a; }
+        .score.medium { color: #ca8a04; }
+        .score.low { color: #dc2626; }
+    </style>
+</head>
+<body>
+    <h1>🔍 PriceHunt AI Accuracy Test Suite</h1>
+    
+    <div class="card">
+        <h3>API Status</h3>
+        <p>Server: <code id="server-url">https://pricehunt-hklm.onrender.com</code></p>
+        <p>Status: <span id="api-status">Checking...</span></p>
+        <p>AI Enabled: <span id="ai-status">-</span></p>
+    </div>
+    
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-value" id="total-tests">0</div>
+            <div class="stat-label">Total Tests</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value" id="accuracy">-%</div>
+            <div class="stat-label">Avg Accuracy</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value" id="best-deal-accuracy">-%</div>
+            <div class="stat-label">Best Deal Accuracy</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value" id="avg-latency">-ms</div>
+            <div class="stat-label">Avg Latency</div>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h3>Run Tests</h3>
+        <button onclick="runAllTests()">🚀 Run All Tests</button>
+        <button onclick="runQuotaCheck()">📊 Check Quota</button>
+        <button onclick="clearResults()">🗑️ Clear Results</button>
+        <div class="progress" style="margin-top: 15px;">
+            <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+        </div>
+        <p id="progress-text" style="font-size: 14px; color: #666;">Ready to run tests</p>
+    </div>
+    
+    <div class="card" id="quota-card" style="display:none;">
+        <h3>📊 AI Provider Quota Status</h3>
+        <pre id="quota-info"></pre>
+    </div>
+    
+    <div class="card">
+        <h3>Test Results</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Test Case</th>
+                    <th>Accuracy</th>
+                    <th>Precision</th>
+                    <th>Recall</th>
+                    <th>Best Deal</th>
+                    <th>Latency</th>
+                    <th>AI Model</th>
+                </tr>
+            </thead>
+            <tbody id="results-table"></tbody>
+        </table>
+    </div>
+    
+    <div class="card">
+        <h3>Detailed Results</h3>
+        <div id="detailed-results"></div>
+    </div>
+    
+    <script>
+const API_URL = 'https://pricehunt-hklm.onrender.com';
+
+const TEST_CASES = [
+    {
+        name: "strawberry_fresh_fruit",
+        query: "strawberry",
+        description: "Fresh strawberry fruits should be top results",
+        products: [
+            {name: "Fresh Strawberry 200g", price: 99, platform: "Zepto"},
+            {name: "Strawberry Shake 200ml", price: 45, platform: "BigBasket"},
+            {name: "Strawberry Jam 200g", price: 89, platform: "Amazon"},
+            {name: "American Strawberry 200g Pack", price: 149, platform: "Blinkit"},
+            {name: "Strawberry Flavoured Milk 200ml", price: 35, platform: "JioMart"},
+            {name: "Fresh Strawberries Premium 250g", price: 129, platform: "Instamart"},
+            {name: "Strawberry Ice Cream 500ml", price: 159, platform: "BigBasket"},
+            {name: "Driscoll's Strawberries 454g", price: 299, platform: "Amazon Fresh"}
+        ],
+        expected_relevant: ["Fresh Strawberry 200g", "American Strawberry 200g Pack", "Fresh Strawberries Premium 250g", "Driscoll's Strawberries 454g"],
+        expected_best_deal_contains: ["strawberry", "strawberries"],
+        expected_best_deal_excludes: ["shake", "jam", "milk", "ice cream", "flavour"]
+    },
+    {
+        name: "banana_fresh_fruit",
+        query: "banana",
+        description: "Fresh bananas should be prioritized over banana chips, cakes",
+        products: [
+            {name: "Banana Robusta 1kg", price: 49, platform: "Zepto"},
+            {name: "Yellaki Banana 12 pcs", price: 59, platform: "BigBasket"},
+            {name: "Banana Chips 150g", price: 45, platform: "Amazon"},
+            {name: "Banana Cake Slice", price: 55, platform: "Blinkit"},
+            {name: "Cavendish Banana 6 pcs", price: 45, platform: "Instamart"},
+            {name: "Raw Banana 500g", price: 35, platform: "JioMart"},
+            {name: "Banana Wafer 200g", price: 65, platform: "BigBasket"},
+            {name: "Ripe Banana Pack 6 pcs", price: 55, platform: "Flipkart Minutes"}
+        ],
+        expected_relevant: ["Banana Robusta 1kg", "Yellaki Banana 12 pcs", "Cavendish Banana 6 pcs", "Raw Banana 500g", "Ripe Banana Pack 6 pcs"],
+        expected_best_deal_contains: ["banana"],
+        expected_best_deal_excludes: ["chips", "cake", "wafer"]
+    },
+    {
+        name: "milk_fresh",
+        query: "milk",
+        description: "Fresh milk, not Dairy Milk chocolate or milkshakes",
+        products: [
+            {name: "Amul Taaza Toned Milk 500ml", price: 28, platform: "Zepto"},
+            {name: "Mother Dairy Full Cream Milk 1L", price: 68, platform: "BigBasket"},
+            {name: "Cadbury Dairy Milk Chocolate 50g", price: 50, platform: "Blinkit"},
+            {name: "Nestle Milkshake Strawberry 180ml", price: 35, platform: "JioMart"},
+            {name: "Nandini Milk 500ml", price: 25, platform: "Instamart"},
+            {name: "Milk Bikis Biscuit 100g", price: 20, platform: "Amazon"},
+            {name: "Heritage Slim Milk 500ml", price: 30, platform: "BigBasket"},
+            {name: "Milkmaid Condensed Milk 400g", price: 99, platform: "Amazon"}
+        ],
+        expected_relevant: ["Amul Taaza Toned Milk 500ml", "Mother Dairy Full Cream Milk 1L", "Nandini Milk 500ml", "Heritage Slim Milk 500ml"],
+        expected_best_deal_contains: ["milk"],
+        expected_best_deal_excludes: ["chocolate", "milkshake", "bikis", "biscuit", "condensed", "dairy milk"]
+    },
+    {
+        name: "apple_fresh_fruit",
+        query: "apple",
+        description: "Fresh apples, not apple juice or pineapple",
+        products: [
+            {name: "Fresh Apple Red Delicious 1kg", price: 180, platform: "BigBasket"},
+            {name: "Apple iPhone 15 Case", price: 999, platform: "Amazon"},
+            {name: "Real Apple Juice 1L", price: 99, platform: "Zepto"},
+            {name: "Organic Green Apple 500g", price: 120, platform: "JioMart"},
+            {name: "Pineapple Fresh 1kg", price: 90, platform: "Instamart"},
+            {name: "Shimla Apple Premium 1kg", price: 200, platform: "Blinkit"},
+            {name: "Apple Cider Vinegar 500ml", price: 250, platform: "BigBasket"},
+            {name: "Washington Apple 4pcs", price: 160, platform: "Zepto"}
+        ],
+        expected_relevant: ["Fresh Apple Red Delicious 1kg", "Organic Green Apple 500g", "Shimla Apple Premium 1kg", "Washington Apple 4pcs"],
+        expected_best_deal_contains: ["apple"],
+        expected_best_deal_excludes: ["juice", "iphone", "pineapple", "vinegar", "cider"]
+    },
+    {
+        name: "grape_compound_trap",
+        query: "grape",
+        description: "Grapes, not grapefruit (different fruit)",
+        products: [
+            {name: "Fresh Grapes Green 500g", price: 80, platform: "BigBasket"},
+            {name: "Grapefruit Fresh 1kg", price: 120, platform: "Zepto"},
+            {name: "Red Grapes Seedless 500g", price: 90, platform: "Amazon"},
+            {name: "Grape Juice 1L", price: 99, platform: "JioMart"},
+            {name: "Black Grapes 500g", price: 100, platform: "Instamart"},
+            {name: "Grapeseed Oil 500ml", price: 250, platform: "Amazon"}
+        ],
+        expected_relevant: ["Fresh Grapes Green 500g", "Red Grapes Seedless 500g", "Black Grapes 500g"],
+        expected_best_deal_contains: ["grape"],
+        expected_best_deal_excludes: ["grapefruit", "grapeseed", "juice", "oil"]
+    },
+    {
+        name: "tomato_fresh",
+        query: "tomato",
+        description: "Fresh tomatoes, not ketchup or sauce",
+        products: [
+            {name: "Fresh Tomato Local 1kg", price: 40, platform: "Zepto"},
+            {name: "Tomato Ketchup 500g", price: 99, platform: "Amazon"},
+            {name: "Kissan Tomato Sauce 500g", price: 89, platform: "BigBasket"},
+            {name: "Organic Tomato 500g", price: 60, platform: "JioMart"},
+            {name: "Cherry Tomato 200g", price: 80, platform: "Instamart"},
+            {name: "Tomato Puree 200g", price: 45, platform: "Blinkit"},
+            {name: "Hybrid Tomato 1kg", price: 55, platform: "BigBasket"}
+        ],
+        expected_relevant: ["Fresh Tomato Local 1kg", "Organic Tomato 500g", "Cherry Tomato 200g", "Hybrid Tomato 1kg"],
+        expected_best_deal_contains: ["tomato"],
+        expected_best_deal_excludes: ["ketchup", "sauce", "puree"]
+    },
+    {
+        name: "eggs_fresh",
+        query: "eggs",
+        description: "Fresh eggs, not eggless products",
+        products: [
+            {name: "Farm Fresh Eggs 12pcs", price: 90, platform: "BigBasket"},
+            {name: "Country Eggs 6pcs", price: 65, platform: "Zepto"},
+            {name: "Eggless Mayo 250g", price: 60, platform: "Blinkit"},
+            {name: "Eggless Cake Mix 500g", price: 80, platform: "Amazon"},
+            {name: "Brown Eggs 6pcs", price: 72, platform: "Instamart"},
+            {name: "Omega-3 Eggs 6pcs", price: 85, platform: "JioMart"}
+        ],
+        expected_relevant: ["Farm Fresh Eggs 12pcs", "Country Eggs 6pcs", "Brown Eggs 6pcs", "Omega-3 Eggs 6pcs"],
+        expected_best_deal_contains: ["eggs", "egg"],
+        expected_best_deal_excludes: ["eggless"]
+    },
+    {
+        name: "mango_fresh",
+        query: "mango",
+        description: "Fresh mangoes, not mango drinks or pickles",
+        products: [
+            {name: "Alphonso Mango 1kg", price: 450, platform: "BigBasket"},
+            {name: "Maaza Mango Drink 600ml", price: 45, platform: "Zepto"},
+            {name: "Mango Pickle 200g", price: 65, platform: "Amazon"},
+            {name: "Kesar Mango 1kg", price: 350, platform: "JioMart"},
+            {name: "Raw Mango 500g", price: 60, platform: "Instamart"},
+            {name: "Mango Shake Powder 200g", price: 99, platform: "Blinkit"},
+            {name: "Badami Mango 1kg", price: 280, platform: "BigBasket"}
+        ],
+        expected_relevant: ["Alphonso Mango 1kg", "Kesar Mango 1kg", "Raw Mango 500g", "Badami Mango 1kg"],
+        expected_best_deal_contains: ["mango"],
+        expected_best_deal_excludes: ["drink", "pickle", "shake", "powder", "maaza"]
+    }
+];
+
+let results = [];
+
+async function checkAPI() {
+    try {
+        const resp = await fetch(`${API_URL}/`);
+        const data = await resp.json();
+        document.getElementById('api-status').innerHTML = '<span class="badge badge-green">Online</span>';
+        document.getElementById('ai-status').innerHTML = data.ai_enabled 
+            ? '<span class="badge badge-green">Enabled</span>' 
+            : '<span class="badge badge-red">Disabled</span>';
+        return data;
+    } catch(e) {
+        document.getElementById('api-status').innerHTML = '<span class="badge badge-red">Offline</span>';
+        return null;
+    }
+}
+
+async function runQuotaCheck() {
+    const card = document.getElementById('quota-card');
+    card.style.display = 'block';
+    document.getElementById('quota-info').textContent = 'Loading...';
+    try {
+        const resp = await fetch(`${API_URL}/api/groq-ping`);
+        const data = await resp.json();
+        document.getElementById('quota-info').textContent = JSON.stringify(data, null, 2);
+    } catch(e) {
+        document.getElementById('quota-info').textContent = 'Error: ' + e.message;
+    }
+}
+
+async function runSingleTest(testCase) {
+    const startTime = performance.now();
+    try {
+        const resp = await fetch(`${API_URL}/api/smart-search`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                query: testCase.query,
+                products: testCase.products,
+                strict_mode: true
+            })
+        });
+        const data = await resp.json();
+        const latencyMs = Math.round(performance.now() - startTime);
+        
+        // Calculate metrics
+        const relevantProducts = data.results || [];
+        const predictedNames = new Set(relevantProducts.map(p => p.name.toLowerCase().trim()));
+        const expectedNames = new Set(testCase.expected_relevant.map(n => n.toLowerCase().trim()));
+        const allNames = new Set(testCase.products.map(p => p.name.toLowerCase().trim()));
+        
+        const tp = [...predictedNames].filter(n => expectedNames.has(n)).length;
+        const fp = [...predictedNames].filter(n => !expectedNames.has(n)).length;
+        const fn = [...expectedNames].filter(n => !predictedNames.has(n)).length;
+        const tn = [...allNames].filter(n => !predictedNames.has(n) && !expectedNames.has(n)).length;
+        
+        const accuracy = (tp + tn) / allNames.size;
+        const precision = tp / (tp + fp) || 0;
+        const recall = tp / (tp + fn) || 0;
+        const f1 = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0;
+        
+        // Check best deal
+        let bestDealCorrect = false;
+        let bestDealError = null;
+        const bestDeal = data.best_deal;
+        if (bestDeal && bestDeal.name) {
+            const bdNameLower = bestDeal.name.toLowerCase();
+            const containsOk = testCase.expected_best_deal_contains.some(t => bdNameLower.includes(t.toLowerCase()));
+            const excludesOk = !testCase.expected_best_deal_excludes.some(t => bdNameLower.includes(t.toLowerCase()));
+            bestDealCorrect = containsOk && excludesOk;
+            if (!containsOk) bestDealError = `Missing: ${testCase.expected_best_deal_contains.join('/')}`;
+            if (!excludesOk) bestDealError = `Contains excluded term`;
+        } else {
+            bestDealError = 'No best deal';
+        }
+        
+        return {
+            name: testCase.name,
+            query: testCase.query,
+            accuracy, precision, recall, f1,
+            latencyMs,
+            aiPowered: data.ai_powered,
+            aiModel: data.ai_meta?.model || 'unknown',
+            aiProvider: data.ai_meta?.provider || 'unknown',
+            bestDealCorrect,
+            bestDealName: bestDeal?.name,
+            bestDealError,
+            predictedRelevant: [...predictedNames],
+            expectedRelevant: [...expectedNames],
+            tp, fp, fn, tn,
+            error: null
+        };
+    } catch(e) {
+        return {
+            name: testCase.name,
+            query: testCase.query,
+            error: e.message,
+            accuracy: 0, precision: 0, recall: 0, f1: 0,
+            latencyMs: Math.round(performance.now() - startTime),
+            bestDealCorrect: false
+        };
+    }
+}
+
+async function runAllTests() {
+    results = [];
+    const tableBody = document.getElementById('results-table');
+    const detailedDiv = document.getElementById('detailed-results');
+    tableBody.innerHTML = '';
+    detailedDiv.innerHTML = '';
+    
+    document.querySelector('button').disabled = true;
+    
+    for (let i = 0; i < TEST_CASES.length; i++) {
+        const tc = TEST_CASES[i];
+        document.getElementById('progress-text').textContent = `Running: ${tc.name} (${i+1}/${TEST_CASES.length})`;
+        document.getElementById('progress-bar').style.width = `${((i+1)/TEST_CASES.length)*100}%`;
+        
+        const result = await runSingleTest(tc);
+        results.push(result);
+        
+        // Update table
+        const scoreClass = result.accuracy >= 0.8 ? 'high' : result.accuracy >= 0.6 ? 'medium' : 'low';
+        const bdStatus = result.bestDealCorrect 
+            ? '<span class="badge badge-green">✓</span>' 
+            : '<span class="badge badge-red">✗</span>';
+        
+        tableBody.innerHTML += `<tr>
+            <td><strong>${result.name}</strong><br><small>${tc.description}</small></td>
+            <td class="score ${scoreClass}">${(result.accuracy * 100).toFixed(0)}%</td>
+            <td>${(result.precision * 100).toFixed(0)}%</td>
+            <td>${(result.recall * 100).toFixed(0)}%</td>
+            <td>${bdStatus} ${result.bestDealName || '-'}</td>
+            <td>${result.latencyMs}ms</td>
+            <td><small>${result.aiProvider}/${result.aiModel}</small></td>
+        </tr>`;
+        
+        // Detailed results
+        const statusClass = result.error ? 'fail' : result.accuracy >= 0.8 ? 'pass' : 'partial';
+        detailedDiv.innerHTML += `<div class="test-result ${statusClass}">
+            <h4>${result.name} (${result.query})</h4>
+            <p>Accuracy: ${(result.accuracy*100).toFixed(1)}% | Precision: ${(result.precision*100).toFixed(1)}% | Recall: ${(result.recall*100).toFixed(1)}%</p>
+            <p>TP: ${result.tp}, FP: ${result.fp}, FN: ${result.fn}, TN: ${result.tn}</p>
+            <p>Best Deal: ${result.bestDealCorrect ? '✅' : '❌'} ${result.bestDealName || 'None'} ${result.bestDealError ? `(${result.bestDealError})` : ''}</p>
+            <p><strong>Expected:</strong> ${[...result.expectedRelevant || []].join(', ')}</p>
+            <p><strong>Predicted:</strong> ${[...result.predictedRelevant || []].join(', ')}</p>
+            ${result.error ? `<p style="color:red">Error: ${result.error}</p>` : ''}
+        </div>`;
+        
+        // Small delay between tests
+        await new Promise(r => setTimeout(r, 500));
+    }
+    
+    // Update summary stats
+    const validResults = results.filter(r => !r.error);
+    document.getElementById('total-tests').textContent = results.length;
+    document.getElementById('accuracy').textContent = validResults.length > 0 
+        ? (validResults.reduce((s, r) => s + r.accuracy, 0) / validResults.length * 100).toFixed(0) + '%'
+        : '-';
+    document.getElementById('best-deal-accuracy').textContent = validResults.length > 0 
+        ? (validResults.filter(r => r.bestDealCorrect).length / validResults.length * 100).toFixed(0) + '%'
+        : '-';
+    document.getElementById('avg-latency').textContent = validResults.length > 0 
+        ? Math.round(validResults.reduce((s, r) => s + r.latencyMs, 0) / validResults.length) + 'ms'
+        : '-';
+    
+    document.getElementById('progress-text').textContent = 'Tests complete!';
+    document.querySelector('button').disabled = false;
+}
+
+function clearResults() {
+    results = [];
+    document.getElementById('results-table').innerHTML = '';
+    document.getElementById('detailed-results').innerHTML = '';
+    document.getElementById('total-tests').textContent = '0';
+    document.getElementById('accuracy').textContent = '-%';
+    document.getElementById('best-deal-accuracy').textContent = '-%';
+    document.getElementById('avg-latency').textContent = '-ms';
+    document.getElementById('progress-bar').style.width = '0%';
+    document.getElementById('progress-text').textContent = 'Ready to run tests';
+}
+
+// Check API on load
+checkAPI();
+    </script>
+</body>
+</html>

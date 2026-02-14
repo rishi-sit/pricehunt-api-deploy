@@ -54,10 +54,14 @@ class SmartSearch:
     }
     
     # Product types that should NOT be filtered (user is searching for these)
+    # Note: "milk" is NOT included because we want to filter out "Dairy Milk chocolate" etc.
+    # Fruits like "banana", "apple", "strawberry" etc. are NOT included because we want
+    # to filter out processed versions like "banana chips", "apple juice" etc.
     PRODUCT_TYPES = {
         "juice", "oil", "flour", "powder", "sauce", "jam", "pickle",
         "chips", "biscuit", "chocolate", "bread", "rice", "dal",
-        "sugar", "salt", "tea", "coffee", "butter", "ghee", "cheese", "milk"
+        "sugar", "salt", "tea", "coffee", "butter", "ghee", "cheese"
+        # "milk" intentionally excluded - we want to filter "Dairy Milk chocolate"
     }
     
     # Compound word traps (search term vs compound word)
@@ -192,8 +196,10 @@ class SmartSearch:
                 "is_product_type": is_product_type_search
             }
         
-        # Post-process: apply additional rules (avoid double-applying after fallback)
-        if not (ai_result.get("ai_powered") and ai_meta and ai_meta.get("fallback") == "rule_based_after_empty_ai"):
+        # Post-process: apply additional rules
+        # Always apply post-processing when using rule-based filter (including fallback)
+        used_rule_based = ai_meta and ai_meta.get("fallback") == "rule_based_after_empty_ai"
+        if not ai_result.get("ai_powered") or used_rule_based:
             relevant, extra_filtered = self._post_process(
                 relevant,
                 query_normalized,
@@ -293,8 +299,16 @@ class SmartSearch:
                 if trap in name_lower:
                     return False, f"Compound word: '{trap}' is different from '{primary_keyword}'"
         
-        # 2. Check if keyword exists as a complete word
-        keyword_pattern = rf'\b{re.escape(primary_keyword)}s?\b'
+        # 2. Check if keyword exists as a complete word (handle plurals properly)
+        # Handle common plural forms: -s, -es, -ies (strawberry -> strawberries)
+        keyword_base = primary_keyword
+        if primary_keyword.endswith('y'):
+            # strawberry -> strawberr(y|ies)
+            keyword_base = primary_keyword[:-1]
+            keyword_pattern = rf'\b{re.escape(keyword_base)}(y|ies)\b'
+        else:
+            # Simple plural: add optional s or es
+            keyword_pattern = rf'\b{re.escape(primary_keyword)}(s|es)?\b'
         has_exact_match = bool(re.search(keyword_pattern, name_lower))
         
         if not has_exact_match:
@@ -438,15 +452,35 @@ class SmartSearch:
         E.g., "Cadbury Dairy Milk" - "milk" is in brand name but it's chocolate
         """
         brand_traps = {
-            "milk": ["dairy milk", "milkmaid", "milky bar", "milky way"],
-            "fruit": ["fruit loops", "fruity"],
+            "milk": ["dairy milk", "milkmaid", "milky bar", "milky way", "milk bikis"],
+            "fruit": ["fruit loops", "fruity", "fruit burst"],
             "gold": ["gold flake", "gold star"],
             "sun": ["sunfeast", "sundrop"],
+            "honey": ["honey bunches", "honey nut"],
+            "apple": ["apple iphone", "apple watch", "apple airpod", "apple mac"],
+            "orange": ["orange juice", "orangina"],
+        }
+        
+        # Generic product type mismatch - keyword + non-related product type
+        product_type_conflicts = {
+            "milk": ["chocolate", "biscuit", "candy", "toffee", "chips", "wafer"],
+            "banana": ["chips", "cake", "wafer", "bread"],
+            "strawberry": ["shake", "jam", "cake", "ice cream", "candy", "yogurt"],
+            "apple": ["juice", "vinegar", "cider", "case", "watch", "phone"],
+            "mango": ["pickle", "shake", "drink", "candy", "pulp"],
+            "orange": ["juice", "squash", "candy"],
+            "grape": ["juice", "wine", "jam"],
         }
         
         if keyword in brand_traps:
             for trap in brand_traps[keyword]:
                 if trap in product_name:
+                    return True
+        
+        # Check for product type conflicts (keyword + conflicting type)
+        if keyword in product_type_conflicts:
+            for conflict in product_type_conflicts[keyword]:
+                if conflict in product_name:
                     return True
         
         return False
