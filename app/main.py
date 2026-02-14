@@ -411,6 +411,166 @@ async def health_check():
     return {"status": "healthy", "service": "price-comparator"}
 
 
+# ============================================================================
+# Analytics Dashboard Endpoints
+# ============================================================================
+
+from app.analytics import (
+    ScrapeLogRequest, BulkLogRequest, DashboardQueryRequest,
+    log_scrape_event, log_bulk_events, get_dashboard_data,
+    get_recent_logs, get_all_devices
+)
+
+
+@app.post("/api/analytics/log")
+async def log_analytics(log: ScrapeLogRequest):
+    """
+    Log a single scrape event from the Android app.
+    
+    Called after each platform scrape with metrics:
+    - device_id: Unique device identifier
+    - platform: Platform name (Zepto, BigBasket, etc.)
+    - scrape_source: 'device', 'ai_fallback', 'playwright', 'cache'
+    - html_size_kb: Size of HTML response
+    - products_scraped: Number of products found
+    - relevant_products: Number of relevant products after AI filtering
+    - ai_model: Model used for extraction (groq-mistral, gemini, etc.)
+    """
+    try:
+        log_id = log_scrape_event(log)
+        return {
+            "success": True,
+            "log_id": log_id,
+            "message": "Analytics logged successfully"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/api/analytics/log-bulk")
+async def log_analytics_bulk(request: BulkLogRequest):
+    """
+    Log multiple scrape events in a batch (more efficient).
+    
+    Use this to send all platform results at once after a search completes.
+    """
+    try:
+        log_ids = log_bulk_events(request.logs)
+        return {
+            "success": True,
+            "log_ids": log_ids,
+            "count": len(log_ids),
+            "message": f"Logged {len(log_ids)} analytics events"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/api/analytics/dashboard")
+async def get_analytics_dashboard(request: DashboardQueryRequest):
+    """
+    Get dashboard data for a specific device and date range.
+    
+    Returns:
+    - Platform-wise statistics
+    - Scrape source breakdown (device vs server)
+    - AI model usage
+    - Success rates
+    - Products scraped vs relevant products
+    """
+    try:
+        dashboard = get_dashboard_data(
+            device_id=request.device_id,
+            start_date=request.start_date,
+            end_date=request.end_date
+        )
+        return {
+            "success": True,
+            "data": dashboard.model_dump()
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/analytics/dashboard/{device_id}")
+async def get_analytics_dashboard_simple(
+    device_id: str,
+    start_date: str = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: str = Query(None, description="End date (YYYY-MM-DD)")
+):
+    """
+    GET endpoint for dashboard - easier to test in browser.
+    """
+    try:
+        dashboard = get_dashboard_data(
+            device_id=device_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        return {
+            "success": True,
+            "data": dashboard.model_dump()
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/analytics/logs/{device_id}")
+async def get_device_logs(
+    device_id: str,
+    limit: int = Query(100, description="Max logs to return"),
+    platform: str = Query(None, description="Filter by platform")
+):
+    """
+    Get recent scrape logs for a device.
+    Useful for debugging specific platform issues.
+    """
+    try:
+        logs = get_recent_logs(device_id, limit, platform)
+        return {
+            "success": True,
+            "logs": [log.model_dump() for log in logs],
+            "count": len(logs)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/analytics/devices")
+async def list_all_devices():
+    """
+    List all devices that have sent analytics.
+    Useful for admin dashboard.
+    """
+    try:
+        devices = get_all_devices()
+        return {
+            "success": True,
+            "devices": devices,
+            "count": len(devices)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
