@@ -281,3 +281,4 @@ This hybrid approach:
 - ✅ Matches products for easy comparison
 - ✅ Minimal API cost (~$0.0002 per search)
 - ✅ **Offline fallback** - Local SearchIntelligence works when backend unavailable
+# Force redeploy Sat Feb 14 22:16:25 IST 2026
