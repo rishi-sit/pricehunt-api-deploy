@@ -1504,6 +1504,175 @@ JSON only, no explanation:"""
                 }
             }
     
+    def _generate_dynamic_special_notes(self, query: str, products: List[Dict]) -> str:
+        """
+        Generate dynamic special notes based on query patterns and actual products.
+        This handles ANY query, not just hardcoded ones.
+        """
+        query_lower = query.lower().strip()
+        query_words = query_lower.split()
+        notes = []
+        
+        # Get product names for pattern detection
+        product_names = [p.get("name", "").lower() for p in products if p.get("name")]
+        product_names_str = " ".join(product_names)
+        
+        # ============================================================
+        # 1. COMPOUND WORD TRAP DETECTION
+        # Detect if products contain compound words that include the query
+        # ============================================================
+        compound_traps = {
+            "apple": ["pineapple"],
+            "grape": ["grapefruit", "grapeseed"],
+            "berry": ["strawberry", "blueberry", "cranberry", "raspberry", "blackberry"],
+            "orange": ["blood orange"],  # blood orange IS an orange, not a trap
+            "melon": ["watermelon"],  # watermelon is different from melon
+            "nut": ["coconut", "doughnut", "donut", "peanut", "walnut", "chestnut"],
+            "corn": ["peppercorn", "popcorn", "acorn"],
+            "lime": ["sublime"],
+            "date": ["update", "outdate"],
+            "fig": ["figaro", "configuration"],
+            "pea": ["peanut", "peach"],
+            "bean": ["jelly bean"],
+        }
+        
+        detected_traps = []
+        for base_word, trap_words in compound_traps.items():
+            if base_word in query_lower:
+                for trap in trap_words:
+                    if trap in product_names_str and trap != query_lower:
+                        detected_traps.append((base_word, trap))
+        
+        if detected_traps:
+            trap_note = f"COMPOUND WORD TRAPS DETECTED for '{query}':\n"
+            for base, trap in detected_traps:
+                trap_note += f"- '{trap}' contains '{base}' but is DIFFERENT - EXCLUDE (score 0)\n"
+            notes.append(trap_note)
+        
+        # ============================================================
+        # 2. BRAND NAME TRAP DETECTION  
+        # Brands that contain common product words
+        # ============================================================
+        brand_traps = {
+            "milk": ["dairy milk", "milk bikis", "milkmaid", "milkshake"],
+            "fruit": ["passion fruit", "fruit loops", "fruity"],
+            "honey": ["honey bunches", "honey nut"],
+            "butter": ["peanut butter", "buttermilk", "butterfly"],
+            "cheese": ["cheesecake", "cheese balls"],
+            "cream": ["ice cream", "cream biscuit", "cream roll"],
+            "chicken": ["chicken masala", "chicken tikka"],  # These are OK
+            "fish": ["fish fingers", "fish fry"],
+            "egg": ["eggless", "eggplant"],
+            "bread": ["breadcrumbs", "bread sticks"],
+            "rice": ["rice flour", "rice bran"],
+            "sugar": ["sugarcane", "sugar free"],
+            "salt": ["assault", "saltine"],
+            "oil": ["coil", "foil", "soil"],
+            "water": ["watermelon"],
+        }
+        
+        detected_brand_traps = []
+        for product_word, traps in brand_traps.items():
+            if product_word == query_lower or product_word in query_words:
+                for trap in traps:
+                    if trap in product_names_str:
+                        detected_brand_traps.append((product_word, trap))
+        
+        if detected_brand_traps:
+            brand_note = f"BRAND/DERIVATIVE TRAPS DETECTED for '{query}':\n"
+            for base, trap in detected_brand_traps:
+                brand_note += f"- '{trap}' contains '{base}' but is NOT actual {base} - EXCLUDE (score 0-20)\n"
+            notes.append(brand_note)
+        
+        # ============================================================
+        # 3. PROCESSED PRODUCT DETECTION
+        # Common processed forms that should be excluded for fresh queries
+        # ============================================================
+        processed_suffixes = ["juice", "jam", "jelly", "shake", "smoothie", "ice cream", 
+                             "chips", "powder", "flour", "oil", "vinegar", "sauce",
+                             "pickle", "cake", "bread", "biscuit", "cookie", "candy",
+                             "syrup", "spread", "paste", "extract", "essence", "flavour",
+                             "flavored", "flavoured"]
+        
+        # Check if any processed forms exist in products
+        processed_found = []
+        for suffix in processed_suffixes:
+            pattern = f"{query_lower} {suffix}"
+            alt_pattern = f"{query_lower}{suffix}"  # No space
+            if pattern in product_names_str or alt_pattern in product_names_str:
+                processed_found.append(suffix)
+        
+        if processed_found:
+            proc_note = f"PROCESSED PRODUCTS DETECTED for '{query}':\n"
+            proc_note += f"Products containing '{query}' + [{', '.join(processed_found)}] are PROCESSED - EXCLUDE (score 10-25)\n"
+            proc_note += f"Only include FRESH/RAW '{query}' products (score 85-100)\n"
+            notes.append(proc_note)
+        
+        # ============================================================
+        # 4. CATEGORY-SPECIFIC RULES
+        # ============================================================
+        
+        # Fresh produce (fruits/vegetables) - prioritize fresh over processed
+        fresh_produce = ["apple", "banana", "orange", "mango", "grape", "strawberry", 
+                        "tomato", "potato", "onion", "carrot", "cucumber", "lettuce",
+                        "spinach", "cabbage", "broccoli", "cauliflower", "pepper",
+                        "lemon", "lime", "avocado", "kiwi", "papaya", "watermelon",
+                        "pineapple", "pomegranate", "guava", "pear", "plum", "peach",
+                        "cherry", "blueberry", "raspberry", "blackberry", "coconut"]
+        
+        if query_lower in fresh_produce or any(p in query_lower for p in fresh_produce):
+            notes.append(f"""
+FRESH PRODUCE RULE for '{query}':
+- HIGHEST PRIORITY (95-100): Fresh, raw, whole fruit/vegetable
+- MEDIUM (70-85): Cut, sliced, or packaged fresh variants  
+- LOW (10-30): Processed (juice, jam, chips, dried, canned) - EXCLUDE
+- ZERO (0-10): Completely different products - EXCLUDE
+""")
+        
+        # Dairy products
+        dairy_products = ["milk", "curd", "yogurt", "cheese", "butter", "ghee", "paneer", "cream"]
+        if query_lower in dairy_products:
+            notes.append(f"""
+DAIRY PRODUCT RULE for '{query}':
+- HIGHEST PRIORITY (95-100): Actual {query} product (liquid milk, fresh curd, etc.)
+- MEDIUM (70-85): Variants (toned, flavored but still the base product)
+- LOW (10-30): Derivatives (milkshake, cheesecake) - EXCLUDE
+- ZERO (0-10): Brand names containing the word (Dairy Milk chocolate) - EXCLUDE
+""")
+        
+        # Grains and staples
+        staples = ["rice", "wheat", "flour", "atta", "dal", "lentil", "oats", "quinoa"]
+        if query_lower in staples:
+            notes.append(f"""
+STAPLE/GRAIN RULE for '{query}':
+- HIGHEST PRIORITY (95-100): Actual {query} (basmati rice, whole wheat, dal)
+- MEDIUM (70-85): Close variants (brown rice, multigrain)
+- LOW (20-40): Processed derivatives (rice flour, wheat biscuits) - EXCLUDE if user wants raw grain
+""")
+        
+        # Meat/Protein
+        proteins = ["chicken", "mutton", "fish", "egg", "eggs", "prawn", "shrimp", "meat"]
+        if query_lower in proteins:
+            notes.append(f"""
+PROTEIN/MEAT RULE for '{query}':
+- HIGHEST PRIORITY (95-100): Fresh/raw {query} 
+- HIGH (80-95): Cleaned, cut, marinated variants
+- MEDIUM (60-80): Frozen variants
+- LOW (20-40): Heavily processed (nuggets, sausages) - may include based on context
+""")
+        
+        # If no specific notes generated, add generic guidance
+        if not notes:
+            notes.append(f"""
+GENERIC FILTERING RULE for '{query}':
+- HIGHEST PRIORITY (95-100): Products that ARE exactly '{query}'
+- HIGH (80-95): Close variants, same category, different brand/size
+- MEDIUM (50-70): Related but different (process carefully)
+- LOW (0-50): Different products that just contain the word '{query}' - EXCLUDE
+""")
+        
+        return "\n".join(notes)
+
     def _build_filter_prompt(
         self, 
         query: str, 
@@ -1534,108 +1703,8 @@ JSON only, no explanation:"""
         else:
             threshold = 75  # Increased - better filtering for single words
 
-        # Build special notes for problem queries
-        special_notes = ""
-        
-        # MILK - has many brand/derivative traps
-        if query_lower == "milk":
-            special_notes = """
-CRITICAL: User searched for "milk" (liquid dairy milk).
-EXCLUDE these (score 0-30):
-- "Dairy Milk" (Cadbury chocolate brand) - score 0
-- "Milk Bikis" (biscuit brand) - score 0  
-- "Milkmaid" (condensed milk brand) - score 20
-- Milkshake, chocolate milk, flavored milk - score 15
-- Milk powder, milk cake, milk bread - score 10
-
-INCLUDE only (score 85-100):
-- Actual liquid milk: "Amul Milk", "Toned Milk", "Full Cream Milk", "Double Toned Milk"
-- Must be LIQUID MILK, not chocolate/biscuit/condensed/powder
-
-Examples:
-- "Amul Taaza Toned Milk 500ml" = 95 ✓
-- "Nandini Milk 500ml" = 95 ✓
-- "Cadbury Dairy Milk Chocolate" = 0 ✗ (chocolate)
-- "Milk Bikis Biscuit" = 0 ✗ (biscuit)
-- "Milkmaid Condensed Milk" = 15 ✗ (condensed)
-- "Nestle Milkshake" = 10 ✗ (milkshake)
-"""
-
-        # APPLE - pineapple trap + electronics
-        elif query_lower == "apple":
-            special_notes = """
-CRITICAL: User searched for "apple" (the fruit).
-COMPOUND WORD TRAP: "pineapple" is a DIFFERENT fruit - EXCLUDE IT (score 0)!
-Also exclude Apple electronics (iPhone, iPad, AirPods, etc.)
-
-EXCLUDE (score 0-20):
-- "Pineapple" (different fruit) - score 0
-- "Apple iPhone/iPad/AirPods/Watch" (electronics) - score 0
-- "Apple Juice/Cider" (processed) - score 15
-- "Apple Vinegar" (processed) - score 10
-
-INCLUDE only (score 85-100):
-- Fresh apple fruit: "Apple", "Shimla Apple", "Washington Apple", "Green Apple", "Red Apple"
-- Must be the FRUIT, not juice/vinegar/electronics
-
-Examples:
-- "Fresh Apple Red Delicious 1kg" = 95 ✓
-- "Shimla Apple Premium" = 95 ✓
-- "Pineapple Fresh 1kg" = 0 ✗ (different fruit!)
-- "Apple iPhone 15 Case" = 0 ✗ (electronics)
-- "Real Apple Juice" = 15 ✗ (processed)
-"""
-
-        # GRAPE - grapefruit/grapeseed trap
-        elif query_lower in ["grape", "grapes"]:
-            special_notes = """
-CRITICAL: User searched for "grape" (the fruit).
-COMPOUND WORD TRAPS: 
-- "grapefruit" is a DIFFERENT citrus fruit - EXCLUDE (score 0)
-- "grapeseed" is oil from grape seeds - EXCLUDE (score 10)
-
-EXCLUDE (score 0-20):
-- "Grapefruit" (different fruit) - score 0
-- "Grapeseed Oil" (oil product) - score 10
-- "Grape Juice" (processed) - score 15
-- "Grape Wine" (alcohol) - score 5
-
-INCLUDE only (score 85-100):
-- Fresh grapes: "Grapes", "Green Grapes", "Red Grapes", "Black Grapes", "Seedless Grapes"
-- Must be the FRUIT, not juice/wine/oil
-
-Examples:
-- "Fresh Grapes Green 500g" = 95 ✓
-- "Red Grapes Seedless" = 95 ✓
-- "Grapefruit Fresh" = 0 ✗ (different fruit!)
-- "Grapeseed Oil" = 5 ✗ (oil product)
-- "Grape Juice" = 15 ✗ (processed)
-"""
-
-        # STRAWBERRY - processed products
-        elif query_lower == "strawberry":
-            special_notes = """
-CRITICAL: User searched for "strawberry" (the fruit).
-Include ALL fresh strawberry products even with different names.
-
-EXCLUDE (score 0-30):
-- "Strawberry Shake/Smoothie" - score 15
-- "Strawberry Jam/Jelly" - score 20
-- "Strawberry Ice Cream" - score 15
-- "Strawberry Flavoured" anything - score 10
-
-INCLUDE (score 85-100):
-- Fresh strawberries: "Strawberry", "Strawberries", "Fresh Strawberry"
-- Premium/Organic variants: "Driscoll's Strawberries", "Premium Strawberries"
-
-Examples:
-- "Fresh Strawberry 200g" = 95 ✓
-- "Fresh Strawberries Premium 250g" = 95 ✓
-- "Driscoll's Strawberries 454g" = 95 ✓ (IS fresh strawberry)
-- "American Strawberry 200g Pack" = 95 ✓
-- "Strawberry Shake" = 15 ✗ (beverage)
-- "Strawberry Jam" = 20 ✗ (processed)
-"""
+        # Build special notes DYNAMICALLY based on query patterns
+        special_notes = self._generate_dynamic_special_notes(query_lower, products)
 
         multi_word_note = ""
         if is_multi_word:
