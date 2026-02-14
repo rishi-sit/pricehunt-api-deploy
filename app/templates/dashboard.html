@@ -16,35 +16,54 @@
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .tab-active { @apply bg-white text-purple-700 shadow-md; }
+        .tab-inactive { @apply bg-white/20 text-white hover:bg-white/30; }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
     <!-- Header -->
     <header class="gradient-bg text-white py-6 px-8 shadow-lg">
-        <div class="max-w-7xl mx-auto flex justify-between items-center">
-            <div>
-                <h1 class="text-2xl font-bold">🔍 PriceHunt Analytics</h1>
-                <p class="text-purple-200 text-sm">Real-time scraping & AI processing metrics</p>
-            </div>
-            <div class="flex items-center gap-4">
-                <select id="deviceSelect" class="bg-white/20 text-white border border-white/30 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-white/50">
-                    <option value="">Loading devices...</option>
-                </select>
+        <div class="max-w-7xl mx-auto">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h1 class="text-2xl font-bold">🔍 PriceHunt Analytics</h1>
+                    <p class="text-purple-200 text-sm">Real-time scraping & AI processing metrics</p>
+                </div>
                 <button onclick="refreshData()" class="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg transition flex items-center gap-2">
                     <span>🔄</span> Refresh
+                </button>
+            </div>
+            
+            <!-- View Tabs -->
+            <div class="flex gap-2">
+                <button id="tabAppWide" onclick="switchView('app-wide')" class="px-4 py-2 rounded-lg font-medium transition tab-active">
+                    🌍 App-Wide Metrics
+                </button>
+                <button id="tabDevice" onclick="switchView('device')" class="px-4 py-2 rounded-lg font-medium transition tab-inactive">
+                    📱 Device View
+                </button>
+                <button id="tabSessions" onclick="switchView('sessions')" class="px-4 py-2 rounded-lg font-medium transition tab-inactive">
+                    🔗 Recent Sessions
                 </button>
             </div>
         </div>
     </header>
 
-    <!-- Date Range Selector -->
+    <!-- Filters Bar -->
     <div class="max-w-7xl mx-auto px-8 py-4">
         <div class="bg-white rounded-lg shadow p-4 flex items-center gap-4 flex-wrap">
+            <div id="deviceFilterContainer" class="hidden">
+                <label class="text-gray-600 font-medium mr-2">Device:</label>
+                <select id="deviceSelect" class="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:outline-none">
+                    <option value="">Loading devices...</option>
+                </select>
+            </div>
+            
             <label class="text-gray-600 font-medium">Date Range:</label>
             <input type="date" id="startDate" class="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:outline-none">
             <span class="text-gray-400">to</span>
             <input type="date" id="endDate" class="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:outline-none">
-            <button onclick="loadDashboard()" class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition">
+            <button onclick="loadCurrentView()" class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition">
                 Apply
             </button>
             <div class="flex gap-2 ml-auto">
@@ -65,41 +84,41 @@
     <div id="noDataState" class="max-w-7xl mx-auto px-8 py-20 text-center hidden">
         <div class="text-6xl mb-4">📊</div>
         <h2 class="text-xl font-semibold text-gray-700 mb-2">No Analytics Data Yet</h2>
-        <p class="text-gray-500">Select a device and date range to view analytics</p>
+        <p class="text-gray-500">Data will appear after searches are performed</p>
     </div>
 
-    <!-- Dashboard Content -->
-    <main id="dashboardContent" class="max-w-7xl mx-auto px-8 py-6 hidden">
-        <!-- Summary Stats Row -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 fade-in">
+    <!-- APP-WIDE VIEW -->
+    <main id="appWideContent" class="max-w-7xl mx-auto px-8 py-6 hidden">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6 fade-in">
             <div class="stat-card border-blue-500">
                 <p class="text-gray-500 text-sm">Total Scrapes</p>
-                <p id="totalScrapes" class="text-3xl font-bold text-gray-800">-</p>
-                <p class="text-xs text-gray-400 mt-1">All platforms combined</p>
+                <p id="awTotalScrapes" class="text-3xl font-bold text-gray-800">-</p>
+                <p class="text-xs text-gray-400 mt-1">All devices</p>
+            </div>
+            <div class="stat-card border-indigo-500">
+                <p class="text-gray-500 text-sm">Active Devices</p>
+                <p id="awUniqueDevices" class="text-3xl font-bold text-indigo-600">-</p>
             </div>
             <div class="stat-card border-green-500">
                 <p class="text-gray-500 text-sm">Success Rate</p>
-                <p id="successRate" class="text-3xl font-bold text-green-600">-</p>
-                <p class="text-xs text-gray-400 mt-1">Successful extractions</p>
+                <p id="awSuccessRate" class="text-3xl font-bold text-green-600">-</p>
             </div>
             <div class="stat-card border-purple-500">
-                <p class="text-gray-500 text-sm">Products Found</p>
-                <p id="totalProducts" class="text-3xl font-bold text-purple-600">-</p>
-                <p class="text-xs text-gray-400 mt-1">Total products scraped</p>
+                <p class="text-gray-500 text-sm">Total Products</p>
+                <p id="awTotalProducts" class="text-3xl font-bold text-purple-600">-</p>
             </div>
             <div class="stat-card border-orange-500">
-                <p class="text-gray-500 text-sm">Relevant Products</p>
-                <p id="relevantProducts" class="text-3xl font-bold text-orange-600">-</p>
-                <p class="text-xs text-gray-400 mt-1">After AI filtering</p>
+                <p class="text-gray-500 text-sm">AI Relevance</p>
+                <p id="awRelevanceRate" class="text-3xl font-bold text-orange-600">-</p>
             </div>
         </div>
 
-        <!-- AI Quota Usage (Global) -->
+        <!-- AI Quota -->
         <div class="card mb-6 fade-in">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold text-gray-800">🎯 AI Quota Usage (All Devices)</h3>
+                <h3 class="text-lg font-semibold text-gray-800">🎯 AI Quota Usage</h3>
                 <div class="flex items-center gap-2 text-sm">
-                    <span class="text-gray-500">Total Today:</span>
+                    <span class="text-gray-500">Today:</span>
                     <span id="quotaTotalToday" class="font-bold text-purple-600">-</span>
                     <span class="text-gray-400">|</span>
                     <span class="text-gray-500">All Time:</span>
@@ -107,591 +126,431 @@
                 </div>
             </div>
             <div id="quotaCards" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <!-- Quota cards will be inserted here -->
-                <div class="bg-gray-50 rounded-lg p-4 text-center text-gray-400">
-                    Loading quota data...
-                </div>
+                <div class="bg-gray-50 rounded-lg p-4 text-center text-gray-400">Loading...</div>
             </div>
         </div>
 
-        <!-- Charts Row -->
+        <!-- Charts -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            <!-- Scrape Source Chart -->
             <div class="card fade-in">
-                <h3 class="text-lg font-semibold text-gray-800 mb-4">📡 Scrape Source Distribution</h3>
-                <div class="h-64">
-                    <canvas id="scrapeSourceChart"></canvas>
-                </div>
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">📡 Scrape Sources</h3>
+                <div class="h-64"><canvas id="awScrapeSourceChart"></canvas></div>
             </div>
-
-            <!-- Platform Performance Chart -->
             <div class="card fade-in">
-                <h3 class="text-lg font-semibold text-gray-800 mb-4">🏪 Products by Platform</h3>
-                <div class="h-64">
-                    <canvas id="platformChart"></canvas>
-                </div>
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">🏪 Platform Stats</h3>
+                <div class="h-64"><canvas id="awPlatformChart"></canvas></div>
             </div>
         </div>
 
-        <!-- AI Processing Stats -->
-        <div class="card mb-6 fade-in">
-            <h3 class="text-lg font-semibold text-gray-800 mb-4">🤖 AI Processing Stats</h3>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div>
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-gray-600">Total AI Requests</span>
-                        <span id="aiTotalRequests" class="font-semibold">-</span>
-                    </div>
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-gray-600">Successful</span>
-                        <span id="aiSuccessful" class="font-semibold text-green-600">-</span>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <span class="text-gray-600">Failed</span>
-                        <span id="aiFailed" class="font-semibold text-red-600">-</span>
-                    </div>
-                </div>
-                <div>
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-gray-600">Avg Latency</span>
-                        <span id="aiAvgLatency" class="font-semibold">-</span>
-                    </div>
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-gray-600">Products Found</span>
-                        <span id="aiProductsFound" class="font-semibold text-purple-600">-</span>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <span class="text-gray-600">Products Filtered</span>
-                        <span id="aiProductsFiltered" class="font-semibold text-orange-600">-</span>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="text-sm font-medium text-gray-500 mb-2">Provider Distribution</h4>
-                    <div id="providerStats" class="space-y-2">
-                        <p class="text-gray-400 text-sm">No AI data</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Platform Details Table -->
+        <!-- Platform Table -->
         <div class="card mb-6 fade-in">
             <h3 class="text-lg font-semibold text-gray-800 mb-4">📊 Platform Details</h3>
             <div class="overflow-x-auto">
                 <table class="w-full">
-                    <thead>
-                        <tr class="bg-gray-50">
-                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Platform</th>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total Scrapes</th>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Success Rate</th>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Products</th>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Relevant</th>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avg HTML (KB)</th>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avg Latency</th>
-                        </tr>
-                    </thead>
-                    <tbody id="platformTable" class="divide-y divide-gray-200">
-                        <tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No platform data</td></tr>
+                    <thead><tr class="bg-gray-50">
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Platform</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Failure Rate</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Products</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Relevant</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Relevance %</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Latency</th>
+                    </tr></thead>
+                    <tbody id="awPlatformTable" class="divide-y divide-gray-200">
+                        <tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
-        <!-- Recent Logs -->
+        <!-- Session Stats -->
+        <div class="card mb-6 fade-in">
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">🏆 Best Deal Success</h3>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div class="text-center p-4 bg-gray-50 rounded-lg">
+                    <p class="text-gray-500 text-sm">Total Sessions</p>
+                    <p id="awTotalSessions" class="text-2xl font-bold">-</p>
+                </div>
+                <div class="text-center p-4 bg-green-50 rounded-lg">
+                    <p class="text-gray-500 text-sm">Completed</p>
+                    <p id="awCompletedSessions" class="text-2xl font-bold text-green-600">-</p>
+                </div>
+                <div class="text-center p-4 bg-purple-50 rounded-lg">
+                    <p class="text-gray-500 text-sm">With Best Deal</p>
+                    <p id="awWithBestDeal" class="text-2xl font-bold text-purple-600">-</p>
+                </div>
+                <div class="text-center p-4 bg-orange-50 rounded-lg">
+                    <p class="text-gray-500 text-sm">Best Deal Rate</p>
+                    <p id="awBestDealRate" class="text-2xl font-bold text-orange-600">-</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- DEVICE VIEW -->
+    <main id="deviceContent" class="max-w-7xl mx-auto px-8 py-6 hidden">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 fade-in">
+            <div class="stat-card border-blue-500">
+                <p class="text-gray-500 text-sm">Total Scrapes</p>
+                <p id="totalScrapes" class="text-3xl font-bold text-gray-800">-</p>
+            </div>
+            <div class="stat-card border-green-500">
+                <p class="text-gray-500 text-sm">Success Rate</p>
+                <p id="successRate" class="text-3xl font-bold text-green-600">-</p>
+            </div>
+            <div class="stat-card border-purple-500">
+                <p class="text-gray-500 text-sm">Products Found</p>
+                <p id="totalProducts" class="text-3xl font-bold text-purple-600">-</p>
+            </div>
+            <div class="stat-card border-orange-500">
+                <p class="text-gray-500 text-sm">Relevant Products</p>
+                <p id="relevantProducts" class="text-3xl font-bold text-orange-600">-</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div class="card fade-in">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">📡 Scrape Sources</h3>
+                <div class="h-64"><canvas id="scrapeSourceChart"></canvas></div>
+            </div>
+            <div class="card fade-in">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">🏪 Products by Platform</h3>
+                <div class="h-64"><canvas id="platformChart"></canvas></div>
+            </div>
+        </div>
+
+        <div class="card mb-6 fade-in">
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">🤖 AI Processing</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                    <div class="flex items-center justify-between mb-2"><span class="text-gray-600">Total Requests</span><span id="aiTotalRequests" class="font-semibold">-</span></div>
+                    <div class="flex items-center justify-between mb-2"><span class="text-gray-600">Successful</span><span id="aiSuccessful" class="font-semibold text-green-600">-</span></div>
+                    <div class="flex items-center justify-between"><span class="text-gray-600">Failed</span><span id="aiFailed" class="font-semibold text-red-600">-</span></div>
+                </div>
+                <div>
+                    <div class="flex items-center justify-between mb-2"><span class="text-gray-600">Avg Latency</span><span id="aiAvgLatency" class="font-semibold">-</span></div>
+                    <div class="flex items-center justify-between mb-2"><span class="text-gray-600">Products Found</span><span id="aiProductsFound" class="font-semibold text-purple-600">-</span></div>
+                    <div class="flex items-center justify-between"><span class="text-gray-600">Products Filtered</span><span id="aiProductsFiltered" class="font-semibold text-orange-600">-</span></div>
+                </div>
+                <div>
+                    <h4 class="text-sm font-medium text-gray-500 mb-2">Providers</h4>
+                    <div id="providerStats" class="space-y-2"><p class="text-gray-400 text-sm">No data</p></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-6 fade-in">
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">📊 Platform Details</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead><tr class="bg-gray-50">
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Platform</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Scrapes</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Success</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Products</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Relevant</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">HTML</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Latency</th>
+                    </tr></thead>
+                    <tbody id="platformTable" class="divide-y divide-gray-200">
+                        <tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Select a device</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <div class="card fade-in">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold text-gray-800">📝 Recent Scrape Logs</h3>
-                <select id="logPlatformFilter" onchange="filterLogs()" class="border rounded-lg px-3 py-1 text-sm">
-                    <option value="">All Platforms</option>
-                </select>
+                <h3 class="text-lg font-semibold text-gray-800">📝 Recent Logs</h3>
+                <select id="logPlatformFilter" onchange="filterLogs()" class="border rounded-lg px-3 py-1 text-sm"><option value="">All</option></select>
             </div>
             <div class="overflow-x-auto max-h-96">
                 <table class="w-full text-sm">
-                    <thead class="sticky top-0 bg-white">
-                        <tr class="bg-gray-50">
-                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Time</th>
-                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Platform</th>
-                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Query</th>
-                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Source</th>
-                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Products</th>
-                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Status</th>
-                        </tr>
-                    </thead>
+                    <thead class="sticky top-0 bg-white"><tr class="bg-gray-50">
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Time</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Platform</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Query</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Source</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Products</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Status</th>
+                    </tr></thead>
                     <tbody id="logsTable" class="divide-y divide-gray-100">
-                        <tr><td colspan="6" class="px-3 py-8 text-center text-gray-400">No logs yet</td></tr>
+                        <tr><td colspan="6" class="px-3 py-8 text-center text-gray-400">No logs</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
     </main>
 
-    <!-- Footer -->
-    <footer class="text-center py-6 text-gray-400 text-sm">
-        <p>PriceHunt Analytics Dashboard • Built with ❤️</p>
-    </footer>
+    <!-- SESSIONS VIEW -->
+    <main id="sessionsContent" class="max-w-7xl mx-auto px-8 py-6 hidden">
+        <div class="card fade-in">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold text-gray-800">🔗 Recent Sessions</h3>
+                <p class="text-sm text-gray-500">Click to view pipeline</p>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead><tr class="bg-gray-50">
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Device</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Query</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Platforms</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Products</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Best Deal</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Latency</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
+                    </tr></thead>
+                    <tbody id="sessionsTable" class="divide-y divide-gray-200">
+                        <tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <footer class="text-center py-6 text-gray-400 text-sm">PriceHunt Analytics Dashboard</footer>
 
     <script>
-        // Global state
+        let currentView = 'app-wide';
         let currentDeviceId = '';
-        let scrapeSourceChart = null;
-        let platformChart = null;
+        let scrapeSourceChart = null, platformChart = null, awScrapeSourceChart = null, awPlatformChart = null;
         let allLogs = [];
-
-        // API Base URL (same origin)
         const API_BASE = '';
 
-        // Initialize
         document.addEventListener('DOMContentLoaded', () => {
-            setDateRange('today');
+            setDateRange('week');
             loadDevices();
+            loadAppWideStats();
         });
 
-        // Set date range shortcuts
+        function switchView(view) {
+            currentView = view;
+            document.getElementById('tabAppWide').className = view === 'app-wide' ? 'px-4 py-2 rounded-lg font-medium transition tab-active' : 'px-4 py-2 rounded-lg font-medium transition tab-inactive';
+            document.getElementById('tabDevice').className = view === 'device' ? 'px-4 py-2 rounded-lg font-medium transition tab-active' : 'px-4 py-2 rounded-lg font-medium transition tab-inactive';
+            document.getElementById('tabSessions').className = view === 'sessions' ? 'px-4 py-2 rounded-lg font-medium transition tab-active' : 'px-4 py-2 rounded-lg font-medium transition tab-inactive';
+            document.getElementById('deviceFilterContainer').classList.toggle('hidden', view !== 'device');
+            document.getElementById('appWideContent').classList.toggle('hidden', view !== 'app-wide');
+            document.getElementById('deviceContent').classList.toggle('hidden', view !== 'device');
+            document.getElementById('sessionsContent').classList.toggle('hidden', view !== 'sessions');
+            document.getElementById('noDataState').classList.add('hidden');
+            loadCurrentView();
+        }
+
+        function loadCurrentView() {
+            if (currentView === 'app-wide') loadAppWideStats();
+            else if (currentView === 'device') loadDeviceDashboard();
+            else if (currentView === 'sessions') loadSessions();
+        }
+
         function setDateRange(range) {
             const today = new Date();
             const endDate = today.toISOString().split('T')[0];
             let startDate = endDate;
-
-            if (range === 'week') {
-                const weekAgo = new Date(today);
-                weekAgo.setDate(weekAgo.getDate() - 7);
-                startDate = weekAgo.toISOString().split('T')[0];
-            } else if (range === 'month') {
-                const monthAgo = new Date(today);
-                monthAgo.setDate(monthAgo.getDate() - 30);
-                startDate = monthAgo.toISOString().split('T')[0];
-            }
-
+            if (range === 'week') { const d = new Date(today); d.setDate(d.getDate() - 7); startDate = d.toISOString().split('T')[0]; }
+            else if (range === 'month') { const d = new Date(today); d.setDate(d.getDate() - 30); startDate = d.toISOString().split('T')[0]; }
             document.getElementById('startDate').value = startDate;
             document.getElementById('endDate').value = endDate;
-            
-            if (currentDeviceId) {
-                loadDashboard();
-            }
         }
 
-        // Load available devices
         async function loadDevices() {
             try {
-                const response = await fetch(`${API_BASE}/api/analytics/devices`);
-                const data = await response.json();
-                
+                const res = await fetch(API_BASE + '/api/analytics/devices');
+                const data = await res.json();
                 const select = document.getElementById('deviceSelect');
-                select.innerHTML = '<option value="">Select a device...</option>';
-                
-                if (data.success && data.devices && data.devices.length > 0) {
-                    data.devices.forEach(device => {
-                        const option = document.createElement('option');
-                        option.value = device.device_id;
-                        option.textContent = `${device.device_id.substring(0, 8)}... (${device.total_logs} logs)`;
-                        select.appendChild(option);
+                select.innerHTML = '<option value="">Select device...</option>';
+                if (data.success && data.devices) {
+                    data.devices.forEach(d => {
+                        const opt = document.createElement('option');
+                        opt.value = d.device_id;
+                        opt.textContent = d.device_id.substring(0, 8) + '... (' + d.total_logs + ' logs)';
+                        select.appendChild(opt);
                     });
-                    
-                    // Auto-select first device
-                    if (data.devices.length > 0) {
-                        currentDeviceId = data.devices[0].device_id;
-                        select.value = currentDeviceId;
-                        loadDashboard();
-                    }
-                } else {
-                    select.innerHTML = '<option value="">No devices found</option>';
-                    showNoData();
                 }
-                
-                select.addEventListener('change', (e) => {
-                    currentDeviceId = e.target.value;
-                    if (currentDeviceId) {
-                        loadDashboard();
-                    } else {
-                        showNoData();
-                    }
-                });
-            } catch (error) {
-                console.error('Failed to load devices:', error);
-                document.getElementById('deviceSelect').innerHTML = '<option value="">Error loading devices</option>';
-            }
+                select.addEventListener('change', e => { currentDeviceId = e.target.value; if (currentDeviceId) loadDeviceDashboard(); });
+            } catch (e) { console.error(e); }
         }
 
-        // Load dashboard data
-        async function loadDashboard() {
-            if (!currentDeviceId) {
-                showNoData();
-                return;
-            }
-
+        async function loadAppWideStats() {
             showLoading();
-
             const startDate = document.getElementById('startDate').value;
             const endDate = document.getElementById('endDate').value;
-
             try {
-                // Fetch combined analytics + quota stats
-                const [dashboardRes, logsRes, quotaRes] = await Promise.all([
-                    fetch(`${API_BASE}/api/analytics/combined/${currentDeviceId}?start_date=${startDate}&end_date=${endDate}`),
-                    fetch(`${API_BASE}/api/analytics/logs/${currentDeviceId}?limit=100`),
-                    fetch(`${API_BASE}/api/analytics/ai-quota`)
+                const [awRes, qRes] = await Promise.all([
+                    fetch(API_BASE + '/api/analytics/app-wide?start_date=' + startDate + '&end_date=' + endDate),
+                    fetch(API_BASE + '/api/analytics/ai-quota')
                 ]);
-
-                const dashboardData = await dashboardRes.json();
-                const logsData = await logsRes.json();
-                const quotaData = await quotaRes.json();
-
-                if (dashboardData.success) {
-                    renderDashboard(dashboardData.data);
-                }
-
-                if (quotaData.success) {
-                    renderQuotaStats(quotaData.data);
-                }
-
-                if (logsData.success) {
-                    allLogs = logsData.logs || [];
-                    renderLogs(allLogs);
-                    populatePlatformFilter();
-                }
-
-                showDashboard();
-            } catch (error) {
-                console.error('Failed to load dashboard:', error);
-                showNoData();
-            }
+                const awData = await awRes.json();
+                const qData = await qRes.json();
+                if (awData.success) renderAppWideStats(awData.data);
+                if (qData.success) renderQuotaStats(qData.data);
+                document.getElementById('appWideContent').classList.remove('hidden');
+                document.getElementById('loadingState').classList.add('hidden');
+            } catch (e) { console.error(e); showNoData(); }
         }
 
-        // Render dashboard
-        function renderDashboard(data) {
-            const scrapeStats = data.scrape_stats?.data || data.scrape_stats || {};
-            const aiStats = data.ai_processing_stats || {};
-
-            // Summary stats
-            document.getElementById('totalScrapes').textContent = scrapeStats.total_logs || 0;
-            const successRate = scrapeStats.total_logs > 0 
-                ? Math.round((scrapeStats.successful || 0) / scrapeStats.total_logs * 100) 
-                : 0;
-            document.getElementById('successRate').textContent = `${successRate}%`;
-            document.getElementById('totalProducts').textContent = scrapeStats.total_products_scraped || 0;
-            document.getElementById('relevantProducts').textContent = scrapeStats.total_relevant_products || 0;
-
-            // Scrape source chart
-            const scrapeBySource = scrapeStats.scrape_source_breakdown || {};
-            renderScrapeSourceChart(scrapeBySource);
-
-            // Platform chart
-            const platformStats = scrapeStats.platform_stats || [];
-            renderPlatformChart(platformStats);
-
-            // Platform table
-            renderPlatformTable(platformStats);
-
-            // AI Stats
-            document.getElementById('aiTotalRequests').textContent = aiStats.total_requests || 0;
-            document.getElementById('aiSuccessful').textContent = aiStats.successful || 0;
-            document.getElementById('aiFailed').textContent = aiStats.failed || 0;
-            document.getElementById('aiAvgLatency').textContent = `${aiStats.avg_latency_ms || 0}ms`;
-            document.getElementById('aiProductsFound').textContent = aiStats.total_products_found || 0;
-            document.getElementById('aiProductsFiltered').textContent = aiStats.total_products_filtered || 0;
-
-            // Provider stats
-            const providerStatsDiv = document.getElementById('providerStats');
-            const providerStats = aiStats.provider_stats || [];
-            if (providerStats.length > 0) {
-                providerStatsDiv.innerHTML = providerStats.map(p => `
-                    <div class="flex items-center justify-between bg-gray-50 rounded px-2 py-1">
-                        <span class="text-sm">
-                            <span class="font-medium">${p.provider}</span>
-                            <span class="text-gray-400 text-xs">(${p.model || 'unknown'})</span>
-                        </span>
-                        <span class="text-sm font-medium">${p.requests} reqs</span>
-                    </div>
-                `).join('');
-            } else {
-                providerStatsDiv.innerHTML = '<p class="text-gray-400 text-sm">No AI processing data</p>';
-            }
+        function renderAppWideStats(data) {
+            const o = data.overview || {};
+            document.getElementById('awTotalScrapes').textContent = o.total_scrapes || 0;
+            document.getElementById('awUniqueDevices').textContent = o.unique_devices || 0;
+            document.getElementById('awSuccessRate').textContent = (o.success_rate || 0) + '%';
+            document.getElementById('awTotalProducts').textContent = o.total_products || 0;
+            document.getElementById('awRelevanceRate').textContent = (o.relevance_rate || 0) + '%';
+            renderAwScrapeChart(data.scrape_sources || []);
+            renderAwPlatformChart(data.platforms || []);
+            renderAwPlatformTable(data.platforms || []);
+            const s = data.sessions || {};
+            document.getElementById('awTotalSessions').textContent = s.total_sessions || 0;
+            document.getElementById('awCompletedSessions').textContent = s.completed || 0;
+            document.getElementById('awWithBestDeal').textContent = s.with_best_deal || 0;
+            document.getElementById('awBestDealRate').textContent = (s.best_deal_rate || 0) + '%';
         }
 
-        // Render AI Quota Stats
+        function renderAwScrapeChart(sources) {
+            const ctx = document.getElementById('awScrapeSourceChart').getContext('2d');
+            if (awScrapeSourceChart) awScrapeSourceChart.destroy();
+            const colors = { 'device': '#10B981', 'ai_fallback': '#8B5CF6', 'playwright': '#F59E0B', 'cache': '#6B7280' };
+            awScrapeSourceChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: { labels: sources.map(s => (s.source || 'unknown').replace('_', ' ').toUpperCase()), datasets: [{ data: sources.map(s => s.count), backgroundColor: sources.map(s => colors[s.source] || '#CBD5E1'), borderWidth: 0 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        function renderAwPlatformChart(platforms) {
+            const ctx = document.getElementById('awPlatformChart').getContext('2d');
+            if (awPlatformChart) awPlatformChart.destroy();
+            awPlatformChart = new Chart(ctx, {
+                type: 'bar',
+                data: { labels: platforms.map(p => p.platform), datasets: [{ label: 'Success', data: platforms.map(p => p.successful || 0), backgroundColor: '#10B981' }, { label: 'Failed', data: platforms.map(p => p.failed || 0), backgroundColor: '#EF4444' }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } }
+            });
+        }
+
+        function renderAwPlatformTable(platforms) {
+            const tbody = document.getElementById('awPlatformTable');
+            if (!platforms.length) { tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No data</td></tr>'; return; }
+            tbody.innerHTML = platforms.map(p => '<tr class="hover:bg-gray-50"><td class="px-4 py-3 font-medium">' + p.platform + '</td><td class="px-4 py-3">' + (p.total || 0) + '</td><td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs ' + (p.failure_rate <= 10 ? 'bg-green-100 text-green-700' : p.failure_rate <= 30 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700') + '">' + (p.failure_rate || 0) + '% failed</span></td><td class="px-4 py-3">' + (p.products || 0) + '</td><td class="px-4 py-3">' + (p.relevant || 0) + '</td><td class="px-4 py-3">' + (p.relevance_rate || 0) + '%</td><td class="px-4 py-3">' + (p.avg_latency_ms || 0) + 'ms</td></tr>').join('');
+        }
+
         function renderQuotaStats(data) {
             document.getElementById('quotaTotalToday').textContent = data.total_today || 0;
             document.getElementById('quotaTotalAllTime').textContent = data.total_all_time || 0;
-
-            const quotaCards = document.getElementById('quotaCards');
+            const qc = document.getElementById('quotaCards');
             const providers = data.providers || [];
-
-            if (providers.length === 0) {
-                quotaCards.innerHTML = `
-                    <div class="col-span-3 bg-gray-50 rounded-lg p-6 text-center">
-                        <p class="text-gray-400">No AI requests logged yet</p>
-                        <p class="text-gray-300 text-sm mt-1">Data will appear after AI processing occurs</p>
-                    </div>
-                `;
-                return;
-            }
-
-            const providerColors = {
-                'groq': { bg: 'bg-blue-50', border: 'border-blue-400', text: 'text-blue-700', progress: 'bg-blue-500' },
-                'gemini': { bg: 'bg-purple-50', border: 'border-purple-400', text: 'text-purple-700', progress: 'bg-purple-500' },
-                'mistral': { bg: 'bg-orange-50', border: 'border-orange-400', text: 'text-orange-700', progress: 'bg-orange-500' }
-            };
-
-            quotaCards.innerHTML = providers.map(p => {
-                const colors = providerColors[p.provider.toLowerCase()] || { bg: 'bg-gray-50', border: 'border-gray-400', text: 'text-gray-700', progress: 'bg-gray-500' };
-                const quotaPercent = p.quota_percent_used || 0;
-                const progressColor = quotaPercent > 80 ? 'bg-red-500' : quotaPercent > 50 ? 'bg-yellow-500' : colors.progress;
-                const dailyLimit = p.quota_limit?.daily || '?';
-                const remaining = p.quota_remaining !== undefined ? p.quota_remaining : '?';
-
-                return `
-                    <div class="${colors.bg} rounded-lg p-4 border-l-4 ${colors.border}">
-                        <div class="flex justify-between items-start mb-3">
-                            <div>
-                                <h4 class="font-bold ${colors.text} text-lg uppercase">${p.provider}</h4>
-                                <p class="text-xs text-gray-500">${p.model || 'unknown model'}</p>
-                            </div>
-                            <div class="text-right">
-                                <p class="text-2xl font-bold ${colors.text}">${p.total_requests}</p>
-                                <p class="text-xs text-gray-400">all-time</p>
-                            </div>
-                        </div>
-                        
-                        <!-- Daily Quota Progress -->
-                        <div class="mb-3">
-                            <div class="flex justify-between text-xs text-gray-500 mb-1">
-                                <span>Today: ${p.today_requests || 0} / ${dailyLimit}</span>
-                                <span>${remaining} remaining</span>
-                            </div>
-                            <div class="w-full bg-gray-200 rounded-full h-2">
-                                <div class="${progressColor} h-2 rounded-full transition-all" style="width: ${Math.min(quotaPercent, 100)}%"></div>
-                            </div>
-                        </div>
-
-                        <!-- Stats Grid -->
-                        <div class="grid grid-cols-2 gap-2 text-xs">
-                            <div class="bg-white/50 rounded p-2">
-                                <p class="text-gray-500">Success Rate</p>
-                                <p class="font-semibold ${p.success_rate >= 90 ? 'text-green-600' : p.success_rate >= 70 ? 'text-yellow-600' : 'text-red-600'}">${p.success_rate}%</p>
-                            </div>
-                            <div class="bg-white/50 rounded p-2">
-                                <p class="text-gray-500">Avg Latency</p>
-                                <p class="font-semibold">${p.avg_latency_ms}ms</p>
-                            </div>
-                            <div class="bg-white/50 rounded p-2">
-                                <p class="text-gray-500">Last Hour</p>
-                                <p class="font-semibold">${p.hour_requests || 0} reqs</p>
-                            </div>
-                            <div class="bg-white/50 rounded p-2">
-                                <p class="text-gray-500">Products</p>
-                                <p class="font-semibold">${p.total_products || 0}</p>
-                            </div>
-                        </div>
-
-                        ${p.quota_limit ? `
-                            <p class="text-xs text-gray-400 mt-2 text-center">${p.quota_limit.description}</p>
-                        ` : ''}
-                    </div>
-                `;
+            if (!providers.length) { qc.innerHTML = '<div class="col-span-3 bg-gray-50 rounded-lg p-6 text-center"><p class="text-gray-400">No AI requests yet</p></div>'; return; }
+            const colors = { 'groq': { bg: 'bg-blue-50', border: 'border-blue-400', text: 'text-blue-700', progress: 'bg-blue-500' }, 'gemini': { bg: 'bg-purple-50', border: 'border-purple-400', text: 'text-purple-700', progress: 'bg-purple-500' }, 'mistral': { bg: 'bg-orange-50', border: 'border-orange-400', text: 'text-orange-700', progress: 'bg-orange-500' } };
+            qc.innerHTML = providers.map(p => {
+                const c = colors[p.provider.toLowerCase()] || { bg: 'bg-gray-50', border: 'border-gray-400', text: 'text-gray-700', progress: 'bg-gray-500' };
+                const pct = p.quota_percent_used || 0;
+                const pc = pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-yellow-500' : c.progress;
+                return '<div class="' + c.bg + ' rounded-lg p-4 border-l-4 ' + c.border + '"><div class="flex justify-between items-start mb-3"><div><h4 class="font-bold ' + c.text + ' text-lg uppercase">' + p.provider + '</h4><p class="text-xs text-gray-500">' + (p.model || 'unknown') + '</p></div><div class="text-right"><p class="text-2xl font-bold ' + c.text + '">' + p.total_requests + '</p><p class="text-xs text-gray-400">all-time</p></div></div><div class="mb-3"><div class="flex justify-between text-xs text-gray-500 mb-1"><span>Today: ' + (p.today_requests || 0) + '</span><span>' + (p.quota_remaining || '?') + ' left</span></div><div class="w-full bg-gray-200 rounded-full h-2"><div class="' + pc + ' h-2 rounded-full" style="width: ' + Math.min(pct, 100) + '%"></div></div></div><div class="grid grid-cols-2 gap-2 text-xs"><div class="bg-white/50 rounded p-2"><p class="text-gray-500">Success</p><p class="font-semibold">' + p.success_rate + '%</p></div><div class="bg-white/50 rounded p-2"><p class="text-gray-500">Latency</p><p class="font-semibold">' + p.avg_latency_ms + 'ms</p></div></div></div>';
             }).join('');
         }
 
-        // Render scrape source chart
+        async function loadDeviceDashboard() {
+            if (!currentDeviceId) { document.getElementById('noDataState').classList.remove('hidden'); document.getElementById('deviceContent').classList.add('hidden'); return; }
+            showLoading();
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            try {
+                const [dRes, lRes] = await Promise.all([
+                    fetch(API_BASE + '/api/analytics/combined/' + currentDeviceId + '?start_date=' + startDate + '&end_date=' + endDate),
+                    fetch(API_BASE + '/api/analytics/logs/' + currentDeviceId + '?limit=100')
+                ]);
+                const dData = await dRes.json();
+                const lData = await lRes.json();
+                if (dData.success) renderDeviceDashboard(dData.data);
+                if (lData.success) { allLogs = lData.logs || []; renderLogs(allLogs); populatePlatformFilter(); }
+                document.getElementById('deviceContent').classList.remove('hidden');
+                document.getElementById('loadingState').classList.add('hidden');
+            } catch (e) { console.error(e); showNoData(); }
+        }
+
+        function renderDeviceDashboard(data) {
+            const ss = data.scrape_stats?.data || data.scrape_stats || {};
+            const ai = data.ai_processing_stats || {};
+            document.getElementById('totalScrapes').textContent = ss.total_logs || 0;
+            const sr = ss.total_logs > 0 ? Math.round((ss.successful || 0) / ss.total_logs * 100) : 0;
+            document.getElementById('successRate').textContent = sr + '%';
+            document.getElementById('totalProducts').textContent = ss.total_products_scraped || 0;
+            document.getElementById('relevantProducts').textContent = ss.total_relevant_products || 0;
+            renderScrapeSourceChart(ss.scrape_source_breakdown || {});
+            renderPlatformChart(ss.platform_stats || []);
+            renderPlatformTable(ss.platform_stats || []);
+            document.getElementById('aiTotalRequests').textContent = ai.total_requests || 0;
+            document.getElementById('aiSuccessful').textContent = ai.successful || 0;
+            document.getElementById('aiFailed').textContent = ai.failed || 0;
+            document.getElementById('aiAvgLatency').textContent = (ai.avg_latency_ms || 0) + 'ms';
+            document.getElementById('aiProductsFound').textContent = ai.total_products_found || 0;
+            document.getElementById('aiProductsFiltered').textContent = ai.total_products_filtered || 0;
+            const ps = document.getElementById('providerStats');
+            const pstats = ai.provider_stats || [];
+            ps.innerHTML = pstats.length ? pstats.map(p => '<div class="flex items-center justify-between bg-gray-50 rounded px-2 py-1"><span class="text-sm font-medium">' + p.provider + '</span><span class="text-sm font-medium">' + p.requests + ' reqs</span></div>').join('') : '<p class="text-gray-400 text-sm">No data</p>';
+        }
+
         function renderScrapeSourceChart(data) {
             const ctx = document.getElementById('scrapeSourceChart').getContext('2d');
-            
-            if (scrapeSourceChart) {
-                scrapeSourceChart.destroy();
-            }
-
+            if (scrapeSourceChart) scrapeSourceChart.destroy();
             const labels = Object.keys(data);
             const values = Object.values(data);
-            const colors = {
-                'device': '#10B981',
-                'ai_fallback': '#8B5CF6',
-                'playwright': '#F59E0B',
-                'cache': '#6B7280'
-            };
-
-            scrapeSourceChart = new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: labels.map(l => l.replace('_', ' ').toUpperCase()),
-                    datasets: [{
-                        data: values,
-                        backgroundColor: labels.map(l => colors[l] || '#CBD5E1'),
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom'
-                        }
-                    }
-                }
-            });
+            const colors = { 'device': '#10B981', 'ai_fallback': '#8B5CF6', 'playwright': '#F59E0B', 'cache': '#6B7280' };
+            scrapeSourceChart = new Chart(ctx, { type: 'doughnut', data: { labels: labels.map(l => l.replace('_', ' ').toUpperCase()), datasets: [{ data: values, backgroundColor: labels.map(l => colors[l] || '#CBD5E1'), borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } } });
         }
 
-        // Render platform chart
         function renderPlatformChart(platforms) {
             const ctx = document.getElementById('platformChart').getContext('2d');
-            
-            if (platformChart) {
-                platformChart.destroy();
-            }
-
-            const platformColors = {
-                'Zepto': '#8B5CF6',
-                'Blinkit': '#FBBF24',
-                'BigBasket': '#10B981',
-                'Instamart': '#F97316',
-                'Amazon Fresh': '#3B82F6',
-                'Amazon': '#F59E0B',
-                'Flipkart': '#2563EB',
-                'Flipkart Minutes': '#6366F1',
-                'JioMart': '#EF4444',
-                'JioMart Quick': '#EC4899'
-            };
-
-            platformChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: platforms.map(p => p.platform),
-                    datasets: [
-                        {
-                            label: 'Products Scraped',
-                            data: platforms.map(p => p.total_products || 0),
-                            backgroundColor: platforms.map(p => platformColors[p.platform] || '#CBD5E1'),
-                        },
-                        {
-                            label: 'Relevant Products',
-                            data: platforms.map(p => p.relevant_products || 0),
-                            backgroundColor: platforms.map(p => (platformColors[p.platform] || '#CBD5E1') + '80'),
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom'
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
-                    }
-                }
-            });
+            if (platformChart) platformChart.destroy();
+            platformChart = new Chart(ctx, { type: 'bar', data: { labels: platforms.map(p => p.platform), datasets: [{ label: 'Products', data: platforms.map(p => p.total_products || 0), backgroundColor: '#8B5CF6' }, { label: 'Relevant', data: platforms.map(p => p.relevant_products || 0), backgroundColor: '#8B5CF680' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } } });
         }
 
-        // Render platform table
         function renderPlatformTable(platforms) {
             const tbody = document.getElementById('platformTable');
-            
-            if (!platforms || platforms.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No platform data</td></tr>';
-                return;
-            }
-
-            tbody.innerHTML = platforms.map(p => {
-                const successRate = p.total_logs > 0 ? Math.round((p.successful || 0) / p.total_logs * 100) : 0;
-                return `
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-3 font-medium">${p.platform}</td>
-                        <td class="px-4 py-3">${p.total_logs || 0}</td>
-                        <td class="px-4 py-3">
-                            <span class="px-2 py-1 rounded-full text-xs ${successRate >= 80 ? 'bg-green-100 text-green-700' : successRate >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}">
-                                ${successRate}%
-                            </span>
-                        </td>
-                        <td class="px-4 py-3">${p.total_products || 0}</td>
-                        <td class="px-4 py-3">${p.relevant_products || 0}</td>
-                        <td class="px-4 py-3">${(p.avg_html_size || 0).toFixed(1)} KB</td>
-                        <td class="px-4 py-3">${(p.avg_latency || 0).toFixed(0)}ms</td>
-                    </tr>
-                `;
-            }).join('');
+            if (!platforms.length) { tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No data</td></tr>'; return; }
+            tbody.innerHTML = platforms.map(p => { const sr = p.total_logs > 0 ? Math.round((p.successful || 0) / p.total_logs * 100) : 0; return '<tr class="hover:bg-gray-50"><td class="px-4 py-3 font-medium">' + p.platform + '</td><td class="px-4 py-3">' + (p.total_logs || 0) + '</td><td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs ' + (sr >= 80 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700') + '">' + sr + '%</span></td><td class="px-4 py-3">' + (p.total_products || 0) + '</td><td class="px-4 py-3">' + (p.relevant_products || 0) + '</td><td class="px-4 py-3">' + (p.avg_html_size || 0).toFixed(1) + ' KB</td><td class="px-4 py-3">' + (p.avg_latency || 0).toFixed(0) + 'ms</td></tr>'; }).join('');
         }
 
-        // Render logs table
         function renderLogs(logs) {
             const tbody = document.getElementById('logsTable');
-            
-            if (!logs || logs.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="px-3 py-8 text-center text-gray-400">No logs yet</td></tr>';
-                return;
-            }
-
-            tbody.innerHTML = logs.slice(0, 50).map(log => {
-                const time = new Date(log.created_at).toLocaleString();
-                const sourceColors = {
-                    'device': 'bg-green-100 text-green-700',
-                    'ai_fallback': 'bg-purple-100 text-purple-700',
-                    'playwright': 'bg-yellow-100 text-yellow-700'
-                };
-                return `
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-3 py-2 text-gray-500">${time}</td>
-                        <td class="px-3 py-2 font-medium">${log.platform}</td>
-                        <td class="px-3 py-2 text-gray-600 truncate max-w-xs">${log.search_query || '-'}</td>
-                        <td class="px-3 py-2">
-                            <span class="px-2 py-0.5 rounded text-xs ${sourceColors[log.scrape_source] || 'bg-gray-100 text-gray-600'}">
-                                ${log.scrape_source || 'unknown'}
-                            </span>
-                        </td>
-                        <td class="px-3 py-2">${log.products_scraped || 0} → ${log.relevant_products || 0}</td>
-                        <td class="px-3 py-2">
-                            ${log.success 
-                                ? '<span class="text-green-500">✓</span>' 
-                                : '<span class="text-red-500">✗</span>'
-                            }
-                        </td>
-                    </tr>
-                `;
-            }).join('');
+            if (!logs.length) { tbody.innerHTML = '<tr><td colspan="6" class="px-3 py-8 text-center text-gray-400">No logs</td></tr>'; return; }
+            const sc = { 'device': 'bg-green-100 text-green-700', 'ai_fallback': 'bg-purple-100 text-purple-700', 'playwright': 'bg-yellow-100 text-yellow-700' };
+            tbody.innerHTML = logs.slice(0, 50).map(l => '<tr class="hover:bg-gray-50"><td class="px-3 py-2 text-gray-500">' + new Date(l.created_at).toLocaleString() + '</td><td class="px-3 py-2 font-medium">' + l.platform + '</td><td class="px-3 py-2 text-gray-600 truncate max-w-xs">' + (l.search_query || '-') + '</td><td class="px-3 py-2"><span class="px-2 py-0.5 rounded text-xs ' + (sc[l.scrape_source] || 'bg-gray-100') + '">' + l.scrape_source + '</span></td><td class="px-3 py-2">' + (l.products_scraped || 0) + ' → ' + (l.relevant_products || 0) + '</td><td class="px-3 py-2">' + (l.success ? '<span class="text-green-500">✓</span>' : '<span class="text-red-500">✗</span>') + '</td></tr>').join('');
         }
 
-        // Populate platform filter
         function populatePlatformFilter() {
             const platforms = [...new Set(allLogs.map(l => l.platform))].filter(Boolean);
-            const select = document.getElementById('logPlatformFilter');
-            select.innerHTML = '<option value="">All Platforms</option>' + 
-                platforms.map(p => `<option value="${p}">${p}</option>`).join('');
+            document.getElementById('logPlatformFilter').innerHTML = '<option value="">All</option>' + platforms.map(p => '<option value="' + p + '">' + p + '</option>').join('');
         }
 
-        // Filter logs by platform
         function filterLogs() {
-            const platform = document.getElementById('logPlatformFilter').value;
-            const filtered = platform 
-                ? allLogs.filter(l => l.platform === platform)
-                : allLogs;
-            renderLogs(filtered);
+            const p = document.getElementById('logPlatformFilter').value;
+            renderLogs(p ? allLogs.filter(l => l.platform === p) : allLogs);
         }
 
-        // Refresh data
-        function refreshData() {
-            loadDashboard();
+        async function loadSessions() {
+            showLoading();
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            try {
+                const res = await fetch(API_BASE + '/api/analytics/recent-sessions?start_date=' + startDate + '&end_date=' + endDate + '&limit=50');
+                const data = await res.json();
+                if (data.success) renderSessions(data.sessions || []);
+                document.getElementById('sessionsContent').classList.remove('hidden');
+                document.getElementById('loadingState').classList.add('hidden');
+            } catch (e) { console.error(e); showNoData(); }
         }
 
-        // UI State helpers
-        function showLoading() {
-            document.getElementById('loadingState').classList.remove('hidden');
-            document.getElementById('noDataState').classList.add('hidden');
-            document.getElementById('dashboardContent').classList.add('hidden');
+        function renderSessions(sessions) {
+            const tbody = document.getElementById('sessionsTable');
+            if (!sessions.length) { tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">No sessions. Sessions are created when searches are performed.</td></tr>'; return; }
+            const sc = { 'completed': 'bg-green-100 text-green-700', 'failed': 'bg-red-100 text-red-700', 'in_progress': 'bg-yellow-100 text-yellow-700' };
+            tbody.innerHTML = sessions.map(s => '<tr class="hover:bg-gray-50"><td class="px-4 py-3 text-gray-500 text-sm">' + new Date(s.started_at).toLocaleString() + '</td><td class="px-4 py-3 font-mono text-xs">' + s.device_id_short + '</td><td class="px-4 py-3 font-medium">' + (s.search_query || '-') + '</td><td class="px-4 py-3">' + (s.successful_platforms || 0) + '/' + (s.total_platforms || 0) + '</td><td class="px-4 py-3">' + (s.total_products || 0) + ' → ' + (s.relevant_products || 0) + '</td><td class="px-4 py-3">' + (s.best_deal ? '<span class="font-medium">₹' + s.best_deal.price + '</span> <span class="text-gray-400">@' + s.best_deal.platform + '</span>' : '<span class="text-gray-400">-</span>') + '</td><td class="px-4 py-3">' + (s.total_latency_ms || 0) + 'ms</td><td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs ' + (sc[s.status] || 'bg-gray-100 text-gray-600') + '">' + (s.status || 'unknown') + '</span></td><td class="px-4 py-3"><a href="' + s.pipeline_url + '" class="text-purple-600 hover:text-purple-800 font-medium text-sm">View →</a></td></tr>').join('');
         }
 
-        function showNoData() {
-            document.getElementById('loadingState').classList.add('hidden');
-            document.getElementById('noDataState').classList.remove('hidden');
-            document.getElementById('dashboardContent').classList.add('hidden');
-        }
-
-        function showDashboard() {
-            document.getElementById('loadingState').classList.add('hidden');
-            document.getElementById('noDataState').classList.add('hidden');
-            document.getElementById('dashboardContent').classList.remove('hidden');
-        }
+        function refreshData() { loadCurrentView(); }
+        function showLoading() { document.getElementById('loadingState').classList.remove('hidden'); document.getElementById('noDataState').classList.add('hidden'); document.getElementById('appWideContent').classList.add('hidden'); document.getElementById('deviceContent').classList.add('hidden'); document.getElementById('sessionsContent').classList.add('hidden'); }
+        function showNoData() { document.getElementById('loadingState').classList.add('hidden'); document.getElementById('noDataState').classList.remove('hidden'); document.getElementById('appWideContent').classList.add('hidden'); document.getElementById('deviceContent').classList.add('hidden'); document.getElementById('sessionsContent').classList.add('hidden'); }
     </script>
 </body>
 </html>

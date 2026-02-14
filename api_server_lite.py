@@ -980,6 +980,8 @@ from app.analytics import (
     log_scrape_event, log_bulk_events, get_dashboard_data,
     get_recent_logs, get_all_devices, log_ai_processing,
     get_ai_processing_stats, get_combined_dashboard, get_ai_quota_stats,
+    # NEW: App-wide holistic stats
+    get_app_wide_stats, get_recent_sessions,
     # NEW: Session-based analytics
     CreateSessionRequest, UpdateSessionRequest, PlatformScrapeEventRequest,
     AIProcessingEventRequest, create_session, update_session,
@@ -1158,6 +1160,72 @@ async def get_ai_quota():
         return {
             "success": True,
             "data": quota_stats
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/analytics/app-wide")
+async def get_app_wide_analytics(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """
+    Get HOLISTIC app-wide statistics across ALL devices.
+    
+    This is the "bird's eye view" dashboard showing:
+    - Total searches, products, AI calls across all devices
+    - Platform-wise failure rates (identify problematic platforms)
+    - Best deal success rates
+    - AI relevance extraction accuracy
+    - Scrape source distribution (device vs AI fallback vs playwright)
+    
+    Use this for:
+    - Monitoring overall system health
+    - Identifying quota issues before they hit limits
+    - Spotting platform-specific scraping failures
+    - Measuring AI extraction accuracy
+    """
+    try:
+        stats = get_app_wide_stats(start_date, end_date)
+        return {
+            "success": True,
+            "data": stats
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/analytics/recent-sessions")
+async def get_recent_sessions_endpoint(
+    device_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 50
+):
+    """
+    Get recent search sessions for dashboard display.
+    
+    If device_id is omitted, returns sessions across ALL devices.
+    Each session includes summary info and a link to the pipeline drill-down view.
+    
+    Use this for:
+    - Viewing recent searches across the app
+    - Quick access to session pipeline debugging
+    - Identifying failed sessions
+    """
+    try:
+        sessions = get_recent_sessions(device_id, limit, start_date, end_date)
+        return {
+            "success": True,
+            "sessions": sessions,
+            "count": len(sessions)
         }
     except Exception as e:
         return {

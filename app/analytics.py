@@ -10,7 +10,7 @@ Tracks scraping metrics with device_id as primary key:
 
 import sqlite3
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 from contextlib import contextmanager
@@ -1008,6 +1008,280 @@ def get_ai_quota_stats() -> Dict:
             "providers": provider_totals,
             "quota_limits": quota_limits
         }
+
+
+def get_app_wide_stats(start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict:
+    """
+    Get holistic app-wide statistics across ALL devices.
+    
+    This is the "bird's eye view" of the entire system:
+    - Total searches, products, AI calls across all devices
+    - Platform-wise failure rates
+    - Best deal success rates
+    - AI relevance extraction accuracy
+    - Scrape source distribution (device vs AI fallback vs playwright)
+    """
+    if not start_date:
+        start_date = (date.today() - timedelta(days=7)).isoformat()
+    if not end_date:
+        end_date = date.today().isoformat()
+    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Overall scrape stats across ALL devices
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_scrapes,
+                COUNT(DISTINCT device_id) as unique_devices,
+                COUNT(DISTINCT search_query) as unique_queries,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_scrapes,
+                SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failed_scrapes,
+                SUM(products_scraped) as total_products,
+                SUM(relevant_products) as total_relevant,
+                AVG(latency_ms) as avg_latency_ms
+            FROM scrape_logs
+            WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)
+        """, (start_date, end_date))
+        
+        scrape_totals = cursor.fetchone()
+        
+        # Scrape source breakdown (device vs AI fallback vs playwright)
+        cursor.execute("""
+            SELECT 
+                scrape_source,
+                COUNT(*) as count,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful,
+                AVG(products_scraped) as avg_products
+            FROM scrape_logs
+            WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)
+            GROUP BY scrape_source
+        """, (start_date, end_date))
+        
+        scrape_source_stats = [
+            {
+                "source": row['scrape_source'],
+                "count": row['count'],
+                "successful": row['successful'],
+                "success_rate": round((row['successful'] / row['count'] * 100) if row['count'] > 0 else 0, 1),
+                "avg_products": round(row['avg_products'] or 0, 1)
+            }
+            for row in cursor.fetchall()
+        ]
+        
+        # Platform failure rates
+        cursor.execute("""
+            SELECT 
+                platform,
+                COUNT(*) as total,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful,
+                SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failed,
+                SUM(products_scraped) as products,
+                SUM(relevant_products) as relevant,
+                AVG(latency_ms) as avg_latency
+            FROM scrape_logs
+            WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)
+            GROUP BY platform
+            ORDER BY total DESC
+        """, (start_date, end_date))
+        
+        platform_stats = [
+            {
+                "platform": row['platform'],
+                "total": row['total'],
+                "successful": row['successful'],
+                "failed": row['failed'],
+                "failure_rate": round((row['failed'] / row['total'] * 100) if row['total'] > 0 else 0, 1),
+                "products": row['products'] or 0,
+                "relevant": row['relevant'] or 0,
+                "relevance_rate": round((row['relevant'] / row['products'] * 100) if row['products'] > 0 else 0, 1),
+                "avg_latency_ms": round(row['avg_latency'] or 0, 0)
+            }
+            for row in cursor.fetchall()
+        ]
+        
+        # AI processing stats (extraction accuracy)
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_ai_calls,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_ai,
+                SUM(products_found) as ai_products_found,
+                SUM(products_filtered) as ai_products_filtered,
+                AVG(latency_ms) as avg_ai_latency
+            FROM ai_processing_logs
+            WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)
+        """, (start_date, end_date))
+        
+        ai_totals = cursor.fetchone()
+        
+        # AI provider breakdown
+        cursor.execute("""
+            SELECT 
+                ai_provider,
+                COUNT(*) as calls,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful,
+                SUM(CASE WHEN fallback_reason IS NOT NULL THEN 1 ELSE 0 END) as fallback_calls,
+                AVG(latency_ms) as avg_latency
+            FROM ai_processing_logs
+            WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)
+            GROUP BY ai_provider
+            ORDER BY calls DESC
+        """, (start_date, end_date))
+        
+        ai_provider_stats = [
+            {
+                "provider": row['ai_provider'],
+                "calls": row['calls'],
+                "successful": row['successful'],
+                "success_rate": round((row['successful'] / row['calls'] * 100) if row['calls'] > 0 else 0, 1),
+                "fallback_calls": row['fallback_calls'],
+                "avg_latency_ms": round(row['avg_latency'] or 0, 0)
+            }
+            for row in cursor.fetchall()
+        ]
+        
+        # Session stats (best deal success)
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_sessions,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+                SUM(CASE WHEN best_deal_product IS NOT NULL THEN 1 ELSE 0 END) as with_best_deal,
+                AVG(total_latency_ms) as avg_session_latency,
+                AVG(total_products_found) as avg_products_per_session,
+                AVG(relevant_products) as avg_relevant_per_session
+            FROM search_sessions
+            WHERE date(started_at) >= date(?) AND date(started_at) <= date(?)
+        """, (start_date, end_date))
+        
+        session_stats_row = cursor.fetchone()
+        completed_count = session_stats_row['completed'] or 0
+        with_best_deal_count = session_stats_row['with_best_deal'] or 0
+        session_stats = {
+            "total_sessions": session_stats_row['total_sessions'] or 0,
+            "completed": completed_count,
+            "failed": session_stats_row['failed'] or 0,
+            "with_best_deal": with_best_deal_count,
+            "best_deal_rate": round(
+                (with_best_deal_count / completed_count * 100) 
+                if completed_count > 0 else 0, 1
+            ),
+            "avg_latency_ms": round(session_stats_row['avg_session_latency'] or 0, 0),
+            "avg_products_per_session": round(session_stats_row['avg_products_per_session'] or 0, 1),
+            "avg_relevant_per_session": round(session_stats_row['avg_relevant_per_session'] or 0, 1)
+        }
+        
+        # Calculate AI relevance extraction rate
+        total_scraped = scrape_totals['total_products'] or 0
+        total_relevant = scrape_totals['total_relevant'] or 0
+        relevance_rate = round((total_relevant / total_scraped * 100) if total_scraped > 0 else 0, 1)
+        
+        return {
+            "date_range": {"start": start_date, "end": end_date},
+            "overview": {
+                "total_scrapes": scrape_totals['total_scrapes'] or 0,
+                "unique_devices": scrape_totals['unique_devices'] or 0,
+                "unique_queries": scrape_totals['unique_queries'] or 0,
+                "total_products": total_scraped,
+                "total_relevant": total_relevant,
+                "relevance_rate": relevance_rate,
+                "success_rate": round(
+                    (scrape_totals['successful_scrapes'] / scrape_totals['total_scrapes'] * 100) 
+                    if scrape_totals['total_scrapes'] > 0 else 0, 1
+                ),
+                "avg_latency_ms": round(scrape_totals['avg_latency_ms'] or 0, 0)
+            },
+            "scrape_sources": scrape_source_stats,
+            "platforms": platform_stats,
+            "ai_processing": {
+                "total_calls": ai_totals['total_ai_calls'] or 0,
+                "successful": ai_totals['successful_ai'] or 0,
+                "products_found": ai_totals['ai_products_found'] or 0,
+                "products_filtered": ai_totals['ai_products_filtered'] or 0,
+                "avg_latency_ms": round(ai_totals['avg_ai_latency'] or 0, 0)
+            },
+            "ai_providers": ai_provider_stats,
+            "sessions": session_stats
+        }
+
+
+def get_recent_sessions(
+    device_id: Optional[str] = None,
+    limit: int = 50,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> List[Dict]:
+    """
+    Get recent search sessions for display in dashboard.
+    
+    If device_id is None, returns sessions across ALL devices.
+    Each session includes summary info and a link to drill-down view.
+    """
+    if not start_date:
+        start_date = (date.today() - timedelta(days=7)).isoformat()
+    if not end_date:
+        end_date = date.today().isoformat()
+    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        if device_id:
+            cursor.execute("""
+                SELECT 
+                    session_id, device_id, search_query, pincode,
+                    started_at, completed_at, total_latency_ms,
+                    total_platforms, successful_platforms,
+                    total_products_found, relevant_products,
+                    best_deal_product, best_deal_price, best_deal_platform,
+                    status
+                FROM search_sessions
+                WHERE device_id = ?
+                  AND date(started_at) >= date(?)
+                  AND date(started_at) <= date(?)
+                ORDER BY started_at DESC
+                LIMIT ?
+            """, (device_id, start_date, end_date, limit))
+        else:
+            cursor.execute("""
+                SELECT 
+                    session_id, device_id, search_query, pincode,
+                    started_at, completed_at, total_latency_ms,
+                    total_platforms, successful_platforms,
+                    total_products_found, relevant_products,
+                    best_deal_product, best_deal_price, best_deal_platform,
+                    status
+                FROM search_sessions
+                WHERE date(started_at) >= date(?)
+                  AND date(started_at) <= date(?)
+                ORDER BY started_at DESC
+                LIMIT ?
+            """, (start_date, end_date, limit))
+        
+        sessions = []
+        for row in cursor.fetchall():
+            sessions.append({
+                "session_id": row['session_id'],
+                "device_id": row['device_id'],
+                "device_id_short": row['device_id'][:8] + "..." if row['device_id'] else "unknown",
+                "search_query": row['search_query'],
+                "pincode": row['pincode'],
+                "started_at": row['started_at'],
+                "completed_at": row['completed_at'],
+                "total_latency_ms": row['total_latency_ms'],
+                "total_platforms": row['total_platforms'],
+                "successful_platforms": row['successful_platforms'],
+                "total_products": row['total_products_found'],
+                "relevant_products": row['relevant_products'],
+                "best_deal": {
+                    "product": row['best_deal_product'],
+                    "price": row['best_deal_price'],
+                    "platform": row['best_deal_platform']
+                } if row['best_deal_product'] else None,
+                "status": row['status'],
+                "pipeline_url": f"/session?id={row['session_id']}"
+            })
+        
+        return sessions
 
 
 # ============================================================================
