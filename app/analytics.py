@@ -282,6 +282,49 @@ def init_database():
         except:
             pass
         
+        # ====================================================================
+        # NEW: AI Model Accuracy Tracking table
+        # ====================================================================
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ai_accuracy_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                device_id TEXT,
+                
+                -- Query context
+                search_query TEXT NOT NULL,
+                query_category TEXT,  -- 'fruit', 'dairy', 'snack', 'beverage', etc.
+                
+                -- AI Model that made the decision
+                ai_provider TEXT NOT NULL,
+                ai_model TEXT NOT NULL,
+                
+                -- Products analysis
+                total_input_products INTEGER DEFAULT 0,
+                products_kept INTEGER DEFAULT 0,
+                products_filtered INTEGER DEFAULT 0,
+                
+                -- Relevance score distribution
+                high_relevance_count INTEGER DEFAULT 0,  -- score >= 80
+                medium_relevance_count INTEGER DEFAULT 0,  -- 60-79
+                low_relevance_count INTEGER DEFAULT 0,  -- < 60
+                
+                -- Best deal quality
+                best_deal_relevance_score INTEGER,
+                best_deal_reason TEXT,  -- 'exact_match', 'close_match', 'lowest_price'
+                
+                -- Timing
+                latency_ms INTEGER DEFAULT 0,
+                
+                -- Success metrics
+                success BOOLEAN DEFAULT 1,
+                
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_accuracy_provider ON ai_accuracy_logs(ai_provider, ai_model)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_accuracy_date ON ai_accuracy_logs(date(created_at))")
+        
         conn.commit()
         print(f"[Analytics] Database initialized at {DB_PATH}")
 
@@ -867,6 +910,147 @@ def get_ai_processing_stats(
             "total_products_filtered": totals['total_products_filtered'] or 0,
             "provider_stats": provider_stats,
             "fallback_reasons": fallback_reasons
+        }
+
+
+# ============================================================================
+# AI Model Accuracy Tracking
+# ============================================================================
+
+class AIAccuracyLogRequest(BaseModel):
+    """Request to log AI accuracy metrics for model comparison."""
+    session_id: Optional[str] = None
+    device_id: Optional[str] = None
+    search_query: str
+    query_category: Optional[str] = None  # 'fruit', 'dairy', etc.
+    ai_provider: str
+    ai_model: str
+    total_input_products: int = 0
+    products_kept: int = 0
+    products_filtered: int = 0
+    high_relevance_count: int = 0  # score >= 80
+    medium_relevance_count: int = 0  # 60-79
+    low_relevance_count: int = 0  # < 60
+    best_deal_relevance_score: Optional[int] = None
+    best_deal_reason: Optional[str] = None  # 'exact_match', 'close_match', 'lowest_price'
+    latency_ms: int = 0
+    success: bool = True
+
+
+def log_ai_accuracy(log: AIAccuracyLogRequest) -> int:
+    """Log AI accuracy metrics for model comparison."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO ai_accuracy_logs (
+                session_id, device_id, search_query, query_category,
+                ai_provider, ai_model,
+                total_input_products, products_kept, products_filtered,
+                high_relevance_count, medium_relevance_count, low_relevance_count,
+                best_deal_relevance_score, best_deal_reason,
+                latency_ms, success
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            log.session_id,
+            log.device_id,
+            log.search_query,
+            log.query_category,
+            log.ai_provider,
+            log.ai_model,
+            log.total_input_products,
+            log.products_kept,
+            log.products_filtered,
+            log.high_relevance_count,
+            log.medium_relevance_count,
+            log.low_relevance_count,
+            log.best_deal_relevance_score,
+            log.best_deal_reason,
+            log.latency_ms,
+            log.success
+        ))
+        return cursor.lastrowid
+
+
+def get_ai_model_accuracy_stats(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> Dict[str, Any]:
+    """Get AI model accuracy comparison stats - which models filter better."""
+    if not start_date:
+        start_date = (date.today() - timedelta(days=7)).isoformat()
+    if not end_date:
+        end_date = date.today().isoformat()
+    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Get per-model accuracy stats
+        cursor.execute("""
+            SELECT 
+                ai_provider,
+                ai_model,
+                COUNT(*) as total_calls,
+                AVG(latency_ms) as avg_latency_ms,
+                SUM(total_input_products) as total_input,
+                SUM(products_kept) as total_kept,
+                SUM(products_filtered) as total_filtered,
+                SUM(high_relevance_count) as high_relevance_total,
+                SUM(medium_relevance_count) as medium_relevance_total,
+                SUM(low_relevance_count) as low_relevance_total,
+                AVG(best_deal_relevance_score) as avg_best_deal_score,
+                SUM(CASE WHEN best_deal_reason = 'exact_match' THEN 1 ELSE 0 END) as exact_match_best_deals,
+                SUM(CASE WHEN best_deal_reason = 'close_match' THEN 1 ELSE 0 END) as close_match_best_deals,
+                SUM(CASE WHEN best_deal_reason = 'lowest_price' THEN 1 ELSE 0 END) as lowest_price_best_deals,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_calls
+            FROM ai_accuracy_logs
+            WHERE date(created_at) BETWEEN ? AND ?
+            GROUP BY ai_provider, ai_model
+            ORDER BY total_calls DESC
+        """, (start_date, end_date))
+        
+        model_stats = []
+        for row in cursor.fetchall():
+            total_kept = row['total_kept'] or 0
+            high_rel = row['high_relevance_total'] or 0
+            total_calls = row['total_calls'] or 0
+            
+            # Calculate accuracy score (higher = better filtering)
+            # Accuracy = (high_relevance / total_kept) * 100
+            accuracy_score = (high_rel / total_kept * 100) if total_kept > 0 else 0
+            
+            # Best deal quality = % of best deals that are exact matches
+            exact_matches = row['exact_match_best_deals'] or 0
+            close_matches = row['close_match_best_deals'] or 0
+            best_deal_quality = ((exact_matches + close_matches * 0.5) / total_calls * 100) if total_calls > 0 else 0
+            
+            model_stats.append({
+                "provider": row['ai_provider'],
+                "model": row['ai_model'],
+                "total_calls": total_calls,
+                "avg_latency_ms": round(row['avg_latency_ms'] or 0, 1),
+                "total_input_products": row['total_input'] or 0,
+                "products_kept": total_kept,
+                "products_filtered": row['total_filtered'] or 0,
+                "high_relevance_products": high_rel,
+                "medium_relevance_products": row['medium_relevance_total'] or 0,
+                "low_relevance_products": row['low_relevance_total'] or 0,
+                "accuracy_score": round(accuracy_score, 1),  # % of kept products that are high relevance
+                "best_deal_quality": round(best_deal_quality, 1),  # % of best deals that are exact/close match
+                "avg_best_deal_score": round(row['avg_best_deal_score'] or 0, 1),
+                "exact_match_best_deals": exact_matches,
+                "close_match_best_deals": close_matches,
+                "lowest_price_best_deals": row['lowest_price_best_deals'] or 0,
+                "success_rate": round((row['successful_calls'] / total_calls * 100) if total_calls > 0 else 0, 1)
+            })
+        
+        # Sort by accuracy score
+        model_stats.sort(key=lambda x: x['accuracy_score'], reverse=True)
+        
+        return {
+            "date_range": {"start": start_date, "end": end_date},
+            "model_comparison": model_stats,
+            "best_accuracy_model": model_stats[0] if model_stats else None,
+            "best_latency_model": min(model_stats, key=lambda x: x['avg_latency_ms']) if model_stats else None
         }
 
 

@@ -158,6 +158,9 @@ class AIService:
     PROVIDER_GROQ = "groq"
     PROVIDER_MISTRAL = "mistral"
     PROVIDER_GEMINI = "gemini"
+    PROVIDER_CEREBRAS = "cerebras"  # NEW: Fast inference, free preview
+    PROVIDER_TOGETHER = "together"  # NEW: $25 free credits
+    PROVIDER_OPENROUTER = "openrouter"  # NEW: Access to 100+ models
     
     # Rate limit error codes that trigger fallback
     RATE_LIMIT_CODES = {429, 503}
@@ -175,6 +178,10 @@ class AIService:
         self._setup_groq()
         self._setup_mistral()
         self._setup_gemini()
+        self._setup_cerebras()  # NEW
+        self._setup_together()  # NEW
+        self._setup_openrouter()  # NEW: Access to 100+ models
+        self._setup_together()  # NEW
         
         # Reference to global quota tracker
         self.quota = _quota_tracker
@@ -243,10 +250,113 @@ class AIService:
             "type": "gemini"
         }
     
+    def _setup_cerebras(self):
+        """
+        Setup Cerebras Cloud provider - VERY FAST inference (free preview).
+        
+        Cerebras offers:
+        - Llama 3.3 70B at 2000+ tokens/sec (fastest inference available)
+        - Free preview tier (no token limits during preview)
+        - Rate limit: 30 requests/minute
+        - OpenAI-compatible API
+        
+        Get API key at: https://cloud.cerebras.ai/
+        """
+        api_key = os.getenv("CEREBRAS_API_KEY")
+        if not api_key:
+            return
+        
+        self.providers[self.PROVIDER_CEREBRAS] = {
+            "api_key": api_key,
+            "model": os.getenv("CEREBRAS_MODEL", "llama-3.3-70b"),
+            "base_url": "https://api.cerebras.ai/v1",
+            "type": "openai_compatible",
+            "supports_json_mode": True
+        }
+    
+    def _setup_together(self):
+        """
+        Setup Together.ai provider - High quality, good free tier.
+        
+        Together.ai offers:
+        - $25 free credits for new users
+        - Llama 3.1, Mixtral, Qwen, DeepSeek models
+        - 60 requests/minute rate limit
+        - OpenAI-compatible API
+        
+        Best models for product filtering:
+        - meta-llama/Llama-3.3-70B-Instruct-Turbo (fast, accurate)
+        - meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo
+        - Qwen/Qwen2.5-72B-Instruct-Turbo
+        
+        Get API key at: https://api.together.xyz/
+        """
+        api_key = os.getenv("TOGETHER_API_KEY")
+        if not api_key:
+            return
+        
+        self.providers[self.PROVIDER_TOGETHER] = {
+            "api_key": api_key,
+            "model": os.getenv("TOGETHER_MODEL", "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+            "base_url": "https://api.together.xyz/v1",
+            "type": "openai_compatible",
+            "supports_json_mode": True
+        }
+    
+    def _setup_openrouter(self):
+        """
+        Setup OpenRouter provider - Access to 100+ AI models.
+        
+        OpenRouter offers:
+        - Access to Claude, GPT-4, Llama, Mistral, and 100+ other models
+        - Pay-per-use pricing, some free models available
+        - Free credits for new users
+        - Single API for multiple providers
+        - OpenAI-compatible API
+        
+        Best free/cheap models for product filtering:
+        - meta-llama/llama-3.2-3b-instruct:free (free, decent accuracy)
+        - microsoft/phi-3-mini-128k-instruct:free (free, fast)
+        - google/gemini-2.0-flash-exp:free (free, experimental)
+        - anthropic/claude-3-haiku (cheap, very accurate)
+        
+        Get API key at: https://openrouter.ai/keys
+        """
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            return
+        
+        self.providers[self.PROVIDER_OPENROUTER] = {
+            "api_key": api_key,
+            "model": os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.2-3b-instruct:free"),
+            "base_url": "https://openrouter.ai/api/v1",
+            "type": "openai_compatible",
+            "supports_json_mode": True,
+            "extra_headers": {
+                "HTTP-Referer": "https://pricehunt.app",
+                "X-Title": "PriceHunt"
+            }
+        }
+    
     def _get_available_providers(self) -> List[str]:
-        """Get list of providers that are configured AND not quota-exhausted"""
-        # Priority order can be overridden via AI_PROVIDER_PRIORITY (e.g. "gemini,groq,mistral").
-        default_priority = [self.PROVIDER_GEMINI, self.PROVIDER_GROQ, self.PROVIDER_MISTRAL]
+        """
+        Get list of providers that are configured AND not quota-exhausted.
+        
+        Default priority (optimized for free tier + accuracy):
+        1. Gemini - Good accuracy, generous free tier (1M tokens/day)
+        2. Cerebras - VERY fast, unlimited during preview
+        3. Together.ai - High accuracy, $25 free credits
+        4. Groq - Fast, 6000 req/day free
+        5. Mistral - 1B tokens/month free
+        """
+        default_priority = [
+            self.PROVIDER_GEMINI,
+            self.PROVIDER_CEREBRAS,
+            self.PROVIDER_TOGETHER,
+            self.PROVIDER_GROQ,
+            self.PROVIDER_MISTRAL,
+            self.PROVIDER_OPENROUTER  # Fallback with many free models
+        ]
         env_priority = os.getenv("AI_PROVIDER_PRIORITY", "").strip()
         if env_priority:
             requested = [p.strip().lower() for p in env_priority.split(",") if p.strip()]
@@ -1419,8 +1529,8 @@ JSON only, no explanation:"""
         # Multi-word queries need ALL words to match
         if is_multi_word:
             threshold = 75  # Increased from 60 - ALL words must match
-        elif query_lower in ["milk", "rice", "oil", "sugar", "salt", "flour", "wheat", "banana", "apple", "onion", "potato", "tomato"]:
-            threshold = 75  # Increased from 70 - stricter for common items with many derivatives
+        elif query_lower in ["milk", "rice", "oil", "sugar", "salt", "flour", "wheat", "banana", "apple", "onion", "potato", "tomato", "strawberry", "mango", "orange", "grapes", "chicken", "eggs", "bread"]:
+            threshold = 80  # Higher threshold for common items with many flavored/processed variants
         else:
             threshold = 70  # Increased from 60 - better filtering for single words
 
@@ -1498,14 +1608,34 @@ CRITICAL RULES:
 2. For single-word queries: Be strict about derivatives. "milk chocolate" is NOT "milk"
 3. Processed/derived products are NOT the same as the base product (e.g., "banana chips" ≠ "banana")
 4. Wrong variants/flavors/types should be filtered out (e.g., "full cream milk" ≠ "double toned milk")
+5. PRIORITIZE exact matches: Fresh fruits/vegetables score HIGHEST (95-100), processed versions score LOW
 
 EXAMPLES FOR SINGLE-WORD QUERIES:
+Query: "strawberry"
+- "Fresh Strawberry 200g" = 100 ✓ (IS strawberry fruit - HIGHEST priority)
+- "Strawberry Punnet 250g" = 98 ✓ (IS strawberry fruit)
+- "Organic Strawberries 500g" = 98 ✓ (IS strawberry fruit)
+- "Strawberry Jam" = 25 ✗ (processed - FILTER OUT)
+- "Strawberry Yogurt" = 20 ✗ (flavored product - FILTER OUT)
+- "Strawberry Cake" = 15 ✗ (baked product - FILTER OUT)
+- "Strawberry Ice Cream" = 15 ✗ (flavored product - FILTER OUT)
+- "Strawberry Shake" = 10 ✗ (beverage - FILTER OUT)
+
 Query: "banana"
-- "Fresh Yellow Banana 6pc" = 95 ✓ (IS banana)
-- "Organic Banana 1kg" = 95 ✓ (IS banana)
+- "Fresh Yellow Banana 6pc" = 100 ✓ (IS banana fruit - HIGHEST priority)
+- "Organic Banana 1kg" = 98 ✓ (IS banana fruit)
+- "Robusta Banana" = 98 ✓ (IS banana fruit)
 - "Banana Chips" = 20 ✗ (processed snack - FILTER OUT)
 - "Banana Shake" = 15 ✗ (beverage - FILTER OUT)
 - "Banana Bread" = 10 ✗ (baked product - FILTER OUT)
+
+Query: "apple"
+- "Fresh Apple 1kg" = 100 ✓ (IS apple fruit - HIGHEST priority)
+- "Shimla Apple 4pc" = 98 ✓ (IS apple fruit)
+- "Washington Apple" = 98 ✓ (IS apple fruit)
+- "Apple Juice" = 25 ✗ (processed beverage - FILTER OUT)
+- "Apple Cider Vinegar" = 15 ✗ (vinegar - FILTER OUT)
+- "Apple Pie" = 10 ✗ (baked product - FILTER OUT)
 
 Query: "rice"
 - "Basmati Rice 1kg" = 95 ✓ (IS rice)

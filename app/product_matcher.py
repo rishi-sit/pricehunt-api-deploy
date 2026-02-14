@@ -370,17 +370,51 @@ class ProductMatcher:
         return processed
     
     def _create_product_group(self, group: Dict) -> ProductGroup:
-        """Create a ProductGroup object from group dict"""
+        """
+        Create a ProductGroup object from group dict.
+        
+        Best Deal Selection Strategy:
+        1. First, filter to only HIGH relevance products (score >= 80)
+        2. Among high relevance, pick the LOWEST price
+        3. If no high relevance, fall back to best relevance + lowest price
+        
+        This ensures "strawberry" search shows best deal on actual strawberries,
+        not on strawberry-flavored items that happen to be cheaper.
+        """
         products = group.get("products", [])
         
-        # Find best deal
+        # Find best deal (relevance-aware)
         available_products = [
             p for p in products
             if p.get("available", True) and p.get("price", 0) > 0
         ]
         
         if available_products:
-            best = min(available_products, key=lambda x: x.get("price", float("inf")))
+            # Separate products by relevance quality
+            high_relevance = [p for p in available_products if p.get("relevance_score", 50) >= 80]
+            medium_relevance = [p for p in available_products if 60 <= p.get("relevance_score", 50) < 80]
+            
+            # Best deal selection priority:
+            # 1. Lowest price among high relevance products (exact matches)
+            # 2. Lowest price among medium relevance products
+            # 3. Lowest price among all available products
+            if high_relevance:
+                # Best = highest relevance, then lowest price
+                best = min(high_relevance, key=lambda x: (
+                    -x.get("relevance_score", 50),  # Higher relevance first
+                    x.get("price", float("inf"))    # Then lower price
+                ))
+                best_deal_reason = "exact_match"
+            elif medium_relevance:
+                best = min(medium_relevance, key=lambda x: (
+                    -x.get("relevance_score", 50),
+                    x.get("price", float("inf"))
+                ))
+                best_deal_reason = "close_match"
+            else:
+                best = min(available_products, key=lambda x: x.get("price", float("inf")))
+                best_deal_reason = "lowest_price"
+            
             prices = [p.get("price", 0) for p in available_products if p.get("price", 0) > 0]
             
             best_deal = {
@@ -388,7 +422,9 @@ class ProductMatcher:
                 "price": best.get("price"),
                 "platform": best.get("platform"),
                 "url": best.get("url"),
-                "image_url": best.get("image_url")
+                "image_url": best.get("image_url"),
+                "relevance_score": best.get("relevance_score", 50),
+                "best_deal_reason": best_deal_reason
             }
             
             min_price = min(prices)

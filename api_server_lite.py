@@ -144,6 +144,391 @@ async def reset_quota():
     }
 
 
+@app.get("/api/quota-stats")
+async def get_quota_stats():
+    """
+    Get current AI quota statistics.
+    Shows which providers are available, exhausted, and request counts.
+    """
+    return {
+        "ai_service": gemini.get_quota_stats(),
+        "ai_scraper": ai_scraper.get_quota_stats() if hasattr(ai_scraper, 'get_quota_stats') else {},
+        "ai_available": gemini.is_available(),
+        "ai_scraper_available": ai_scraper.is_available()
+    }
+
+
+@app.get("/api/compare-models")
+async def compare_ai_models(
+    models: str = "gemini-2.5-flash,gemini-2.5-flash-lite",
+    test_query: str = "strawberry"
+):
+    """
+    Compare multiple AI models on the same test cases.
+    
+    Helps identify which model gives the best results for:
+    1. Overall accuracy (correct relevant/irrelevant classification)
+    2. Best deal accuracy (returns correct best deal)
+    3. Latency (response time)
+    
+    Args:
+        models: Comma-separated list of model names to test
+        test_query: Query to test (default: strawberry)
+    
+    Returns:
+        Comparison metrics for each model
+    """
+    import statistics
+    
+    # Test products for the query
+    test_products_map = {
+        "strawberry": [
+            {"name": "Fresh Strawberry 200g", "price": 99, "platform": "Zepto"},
+            {"name": "Strawberry Shake 200ml", "price": 45, "platform": "BigBasket"},
+            {"name": "Strawberry Jam 200g", "price": 89, "platform": "Amazon"},
+            {"name": "American Strawberry 200g Pack", "price": 149, "platform": "Blinkit"},
+            {"name": "Fresh Strawberries Premium 250g", "price": 129, "platform": "Instamart"},
+            {"name": "Strawberry Flavoured Milk 200ml", "price": 35, "platform": "JioMart"},
+        ],
+        "banana": [
+            {"name": "Banana Robusta 1kg", "price": 49, "platform": "Zepto"},
+            {"name": "Yellaki Banana 12 pcs", "price": 59, "platform": "BigBasket"},
+            {"name": "Banana Chips 150g", "price": 45, "platform": "Amazon"},
+            {"name": "Cavendish Banana 6 pcs", "price": 45, "platform": "Instamart"},
+            {"name": "Raw Banana 500g", "price": 35, "platform": "JioMart"},
+            {"name": "Banana Wafer 200g", "price": 65, "platform": "Blinkit"},
+        ],
+        "milk": [
+            {"name": "Amul Taaza Toned Milk 500ml", "price": 28, "platform": "Zepto"},
+            {"name": "Mother Dairy Full Cream Milk 1L", "price": 68, "platform": "BigBasket"},
+            {"name": "Cadbury Dairy Milk Chocolate 50g", "price": 50, "platform": "Blinkit"},
+            {"name": "Nestle Milkshake Strawberry 180ml", "price": 35, "platform": "JioMart"},
+            {"name": "Nandini Milk 500ml", "price": 25, "platform": "Instamart"},
+        ],
+        "apple": [
+            {"name": "Fresh Apple Red Delicious 1kg", "price": 180, "platform": "BigBasket"},
+            {"name": "Apple iPhone 15 Case", "price": 999, "platform": "Amazon"},
+            {"name": "Real Apple Juice 1L", "price": 99, "platform": "Zepto"},
+            {"name": "Organic Green Apple 500g", "price": 120, "platform": "JioMart"},
+            {"name": "Pineapple Fresh 1kg", "price": 90, "platform": "Instamart"},
+        ],
+    }
+    
+    expected_relevant_map = {
+        "strawberry": ["Fresh Strawberry 200g", "American Strawberry 200g Pack", "Fresh Strawberries Premium 250g"],
+        "banana": ["Banana Robusta 1kg", "Yellaki Banana 12 pcs", "Cavendish Banana 6 pcs", "Raw Banana 500g"],
+        "milk": ["Amul Taaza Toned Milk 500ml", "Mother Dairy Full Cream Milk 1L", "Nandini Milk 500ml"],
+        "apple": ["Fresh Apple Red Delicious 1kg", "Organic Green Apple 500g"],
+    }
+    
+    test_products = test_products_map.get(test_query.lower(), test_products_map["strawberry"])
+    expected_relevant = expected_relevant_map.get(test_query.lower(), expected_relevant_map["strawberry"])
+    expected_set = {n.lower().strip() for n in expected_relevant}
+    all_items = {p.get("name", "").lower().strip() for p in test_products}
+    
+    model_list = [m.strip() for m in models.split(",") if m.strip()]
+    results = []
+    
+    for model in model_list:
+        # Determine provider from model name
+        if "gemini" in model.lower() or "gemma" in model.lower():
+            provider = "gemini"
+        elif "llama" in model.lower() or "mixtral" in model.lower():
+            provider = "groq"
+        elif "mistral" in model.lower():
+            provider = "mistral"
+        else:
+            provider = None
+        
+        start_time = time.monotonic()
+        
+        try:
+            ai_result = await gemini.filter_relevant_products_with_provider(
+                query=test_query,
+                products=test_products,
+                strict_mode=True,
+                provider=provider,
+                model=model
+            )
+            
+            latency_ms = int((time.monotonic() - start_time) * 1000)
+            
+            # Calculate metrics
+            relevant_products = ai_result.get("relevant_products", [])
+            predicted_set = {p.get("name", "").lower().strip() for p in relevant_products}
+            
+            tp = len(predicted_set & expected_set)
+            fp = len(predicted_set - expected_set)
+            fn = len(expected_set - predicted_set)
+            tn = len((all_items - predicted_set) & (all_items - expected_set))
+            
+            total = len(all_items)
+            accuracy = (tp + tn) / total if total else 0.0
+            precision = tp / (tp + fp) if (tp + fp) else 0.0
+            recall = tp / (tp + fn) if (tp + fn) else 0.0
+            f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+            
+            # Check best deal
+            best_deal = ai_result.get("best_deal")
+            best_deal_correct = False
+            best_deal_name = None
+            if best_deal:
+                best_deal_name = best_deal.get("name")
+                bd_lower = (best_deal_name or "").lower()
+                # Best deal should be a fresh product (in expected_set)
+                best_deal_correct = any(exp in bd_lower or bd_lower in exp 
+                                       for exp in expected_set)
+            
+            ai_meta = ai_result.get("ai_meta", {})
+            
+            results.append({
+                "model": model,
+                "provider": ai_meta.get("provider", provider),
+                "model_used": ai_meta.get("model", model),
+                "accuracy": accuracy,
+                "precision": precision,
+                "recall": recall,
+                "f1_score": f1,
+                "latency_ms": latency_ms,
+                "tp": tp,
+                "fp": fp,
+                "fn": fn,
+                "tn": tn,
+                "best_deal_correct": best_deal_correct,
+                "best_deal_name": best_deal_name,
+                "predicted_relevant": sorted(predicted_set),
+                "ai_powered": ai_result.get("ai_powered", False),
+                "error": None
+            })
+        except Exception as e:
+            latency_ms = int((time.monotonic() - start_time) * 1000)
+            results.append({
+                "model": model,
+                "provider": provider,
+                "error": str(e),
+                "latency_ms": latency_ms,
+                "accuracy": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1_score": 0.0,
+                "best_deal_correct": False
+            })
+    
+    # Rank models
+    valid_results = [r for r in results if not r.get("error")]
+    if valid_results:
+        best_accuracy = max(valid_results, key=lambda r: r.get("accuracy", 0))
+        best_f1 = max(valid_results, key=lambda r: r.get("f1_score", 0))
+        fastest = min(valid_results, key=lambda r: r.get("latency_ms", float("inf")))
+        best_deal_models = [r for r in valid_results if r.get("best_deal_correct")]
+    else:
+        best_accuracy = best_f1 = fastest = None
+        best_deal_models = []
+    
+    return {
+        "test_query": test_query,
+        "models_tested": model_list,
+        "expected_relevant": expected_relevant,
+        "results": results,
+        "rankings": {
+            "best_accuracy": best_accuracy["model"] if best_accuracy else None,
+            "best_f1": best_f1["model"] if best_f1 else None,
+            "fastest": fastest["model"] if fastest else None,
+            "best_deal_correct_models": [r["model"] for r in best_deal_models]
+        },
+        "recommendations": {
+            "for_accuracy": best_accuracy["model"] if best_accuracy else "No model available",
+            "for_speed": fastest["model"] if fastest else "No model available",
+            "for_best_deal": best_deal_models[0]["model"] if best_deal_models else "No model returned correct best deal"
+        }
+    }
+
+
+@app.get("/api/scraping-metrics")
+async def get_scraping_metrics(days: int = 7, device_id: Optional[str] = None):
+    """
+    Get scraping metrics showing device vs AI fallback success rates.
+    
+    This helps analyze:
+    1. Which platforms need device-side extractor updates
+    2. AI fallback usage patterns
+    3. Overall scraping success rates
+    
+    Args:
+        days: Number of days to look back (default: 7)
+        device_id: Optional filter by device ID
+    
+    Returns:
+        Aggregated metrics for scraping performance
+    """
+    from app.analytics import get_db
+    from datetime import datetime, timedelta
+    
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Get platform scrape events
+        query = """
+            SELECT 
+                platform,
+                scrape_source,
+                COUNT(*) as count,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_count,
+                AVG(products_found) as avg_products,
+                AVG(html_size_kb) as avg_html_kb,
+                AVG(latency_ms) as avg_latency_ms
+            FROM platform_scrape_events
+            WHERE created_at >= ? AND created_at <= ?
+        """
+        params = [start_date.isoformat(), end_date.isoformat()]
+        
+        if device_id:
+            query += " AND device_id = ?"
+            params.append(device_id)
+        
+        query += " GROUP BY platform, scrape_source ORDER BY platform, scrape_source"
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        
+        platform_metrics = {}
+        total_device = 0
+        total_ai = 0
+        total_playwright = 0
+        total_cache = 0
+        
+        for row in rows:
+            platform = row["platform"]
+            source = row["scrape_source"]
+            count = row["count"]
+            
+            if platform not in platform_metrics:
+                platform_metrics[platform] = {
+                    "total": 0,
+                    "device": 0,
+                    "ai_fallback": 0,
+                    "playwright": 0,
+                    "cache": 0,
+                    "device_success_rate": 0.0,
+                    "avg_products": 0.0
+                }
+            
+            platform_metrics[platform]["total"] += count
+            platform_metrics[platform][source] = count
+            
+            if source == "device":
+                total_device += count
+                platform_metrics[platform]["device_success_rate"] = (
+                    row["success_count"] / count if count > 0 else 0.0
+                )
+            elif source == "ai_fallback":
+                total_ai += count
+            elif source == "playwright":
+                total_playwright += count
+            elif source == "cache":
+                total_cache += count
+        
+        # Get AI processing metrics
+        ai_query = """
+            SELECT 
+                ai_provider,
+                ai_model,
+                COUNT(*) as count,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_count,
+                AVG(latency_ms) as avg_latency_ms,
+                AVG(products_output) as avg_products_output
+            FROM ai_processing_events
+            WHERE created_at >= ? AND created_at <= ?
+        """
+        ai_params = [start_date.isoformat(), end_date.isoformat()]
+        if device_id:
+            ai_query += " AND device_id = ?"
+            ai_params.append(device_id)
+        ai_query += " GROUP BY ai_provider, ai_model ORDER BY count DESC"
+        
+        cursor.execute(ai_query, ai_params)
+        ai_rows = cursor.fetchall()
+        
+        ai_metrics = []
+        for row in ai_rows:
+            ai_metrics.append({
+                "provider": row["ai_provider"],
+                "model": row["ai_model"],
+                "requests": row["count"],
+                "success_rate": row["success_count"] / row["count"] if row["count"] > 0 else 0.0,
+                "avg_latency_ms": int(row["avg_latency_ms"] or 0),
+                "avg_products_output": float(row["avg_products_output"] or 0)
+            })
+        
+        total_scrapes = total_device + total_ai + total_playwright + total_cache
+        
+        return {
+            "period": {
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat(),
+                "days": days
+            },
+            "overall": {
+                "total_scrapes": total_scrapes,
+                "device_rate": total_device / total_scrapes if total_scrapes > 0 else 0.0,
+                "ai_fallback_rate": total_ai / total_scrapes if total_scrapes > 0 else 0.0,
+                "playwright_rate": total_playwright / total_scrapes if total_scrapes > 0 else 0.0,
+                "cache_rate": total_cache / total_scrapes if total_scrapes > 0 else 0.0
+            },
+            "by_platform": platform_metrics,
+            "ai_models": ai_metrics,
+            "recommendations": _generate_scraping_recommendations(platform_metrics, ai_metrics)
+        }
+
+
+def _generate_scraping_recommendations(platform_metrics: Dict, ai_metrics: List) -> List[str]:
+    """Generate recommendations based on scraping metrics."""
+    recommendations = []
+    
+    # Check for platforms with high AI fallback rate
+    high_ai_platforms = []
+    for platform, metrics in platform_metrics.items():
+        total = metrics.get("total", 0)
+        ai = metrics.get("ai_fallback", 0)
+        if total > 0 and (ai / total) > 0.5:
+            high_ai_platforms.append(platform)
+    
+    if high_ai_platforms:
+        recommendations.append(
+            f"Platforms with high AI fallback (>50%): {', '.join(high_ai_platforms)}. "
+            "Consider updating device-side extractors for these platforms."
+        )
+    
+    # Check for low device success rates
+    low_success_platforms = []
+    for platform, metrics in platform_metrics.items():
+        if metrics.get("device_success_rate", 0) < 0.5 and metrics.get("device", 0) > 5:
+            low_success_platforms.append(platform)
+    
+    if low_success_platforms:
+        recommendations.append(
+            f"Platforms with low device success rate (<50%): {', '.join(low_success_platforms)}. "
+            "HTML structure may have changed."
+        )
+    
+    # AI model recommendations
+    if ai_metrics:
+        best_model = max(ai_metrics, key=lambda m: m.get("success_rate", 0))
+        if best_model.get("success_rate", 0) > 0.8:
+            recommendations.append(
+                f"Best performing AI model: {best_model['provider']}/{best_model['model']} "
+                f"(success rate: {best_model['success_rate']:.0%})"
+            )
+    
+    if not recommendations:
+        recommendations.append("Scraping is performing well! No immediate action needed.")
+    
+    return recommendations
+
+
 @app.get("/api/gemini-ping")
 async def gemini_ping():
     """Quick connectivity test for Gemini API."""
@@ -986,7 +1371,9 @@ from app.analytics import (
     CreateSessionRequest, UpdateSessionRequest, PlatformScrapeEventRequest,
     AIProcessingEventRequest, create_session, update_session,
     log_platform_scrape_event, log_ai_processing_event, get_session_detail,
-    get_device_sessions, get_session_pipeline_visualization
+    get_device_sessions, get_session_pipeline_visualization,
+    # NEW: AI accuracy tracking
+    AIAccuracyLogRequest, log_ai_accuracy, get_ai_model_accuracy_stats
 )
 
 
@@ -1226,6 +1613,65 @@ async def get_recent_sessions_endpoint(
             "success": True,
             "sessions": sessions,
             "count": len(sessions)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/analytics/ai-accuracy")
+async def get_ai_accuracy_stats_endpoint(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """
+    Get AI model accuracy comparison stats.
+    
+    Compares different AI models (Groq, Gemini, Mistral, Cerebras, Together) on:
+    - Accuracy Score: % of kept products that are high relevance (score >= 80)
+    - Best Deal Quality: % of best deals that are exact/close matches
+    - Average latency
+    - Total calls
+    
+    Use this to determine:
+    - Which AI model filters most accurately
+    - Which model provides best deal accuracy
+    - Performance/accuracy trade-offs
+    """
+    try:
+        stats = get_ai_model_accuracy_stats(start_date, end_date)
+        return {
+            "success": True,
+            "data": stats
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/api/analytics/ai-accuracy/log")
+async def log_ai_accuracy_endpoint(log: AIAccuracyLogRequest):
+    """
+    Log AI accuracy metrics for model comparison.
+    
+    Called after AI filtering completes with metrics:
+    - search_query: What user searched for
+    - ai_provider/model: Which AI was used
+    - products_kept/filtered: Filtering stats
+    - high/medium/low_relevance_count: Score distribution
+    - best_deal_relevance_score: Score of the chosen best deal
+    - best_deal_reason: Why it was chosen (exact_match, close_match, lowest_price)
+    """
+    try:
+        log_id = log_ai_accuracy(log)
+        return {
+            "success": True,
+            "log_id": log_id,
+            "message": "AI accuracy logged successfully"
         }
     except Exception as e:
         return {
