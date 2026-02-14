@@ -252,12 +252,35 @@ def init_database():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_events_provider ON ai_processing_events(ai_provider)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_events_endpoint ON ai_processing_events(endpoint)")
         
-        # Legacy indexes
+        # Legacy indexes (only on columns that exist)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_device_date ON scrape_logs(device_id, date(created_at))")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_platform ON scrape_logs(platform)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_scrape_session ON scrape_logs(session_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_logs_session ON ai_processing_logs(session_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_logs_provider ON ai_processing_logs(ai_provider)")
+        
+        # Add session_id column to legacy tables if not exists (migration)
+        try:
+            cursor.execute("ALTER TABLE scrape_logs ADD COLUMN session_id TEXT")
+        except:
+            pass  # Column already exists
+        try:
+            cursor.execute("ALTER TABLE scrape_logs ADD COLUMN metadata TEXT DEFAULT '{}'")
+        except:
+            pass
+        try:
+            cursor.execute("ALTER TABLE ai_processing_logs ADD COLUMN session_id TEXT")
+        except:
+            pass
+        try:
+            cursor.execute("ALTER TABLE ai_processing_logs ADD COLUMN metadata TEXT DEFAULT '{}'")
+        except:
+            pass
+        
+        # Now create indexes on session_id
+        try:
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_scrape_session ON scrape_logs(session_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_logs_session ON ai_processing_logs(session_id)")
+        except:
+            pass
         
         conn.commit()
         print(f"[Analytics] Database initialized at {DB_PATH}")
