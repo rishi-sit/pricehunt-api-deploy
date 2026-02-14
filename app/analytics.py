@@ -78,14 +78,14 @@ def init_database():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 device_id TEXT,
                 search_query TEXT NOT NULL,
-                endpoint TEXT NOT NULL,  -- 'ai-extract', 'smart-search', 'match-products'
+                platform TEXT,  -- Platform being scraped
+                endpoint TEXT,  -- 'ai-extract', 'smart-search', 'match-products'
                 ai_provider TEXT NOT NULL,  -- 'groq', 'mistral', 'gemini'
                 ai_model TEXT NOT NULL,  -- 'mixtral-8x7b', 'gemini-pro', etc.
                 fallback_reason TEXT,  -- why fallback was used
-                input_products INTEGER DEFAULT 0,
-                output_products INTEGER DEFAULT 0,
-                filtered_out INTEGER DEFAULT 0,
-                tokens_used INTEGER DEFAULT 0,
+                input_html_size_kb REAL DEFAULT 0,
+                products_found INTEGER DEFAULT 0,
+                products_filtered INTEGER DEFAULT 0,
                 latency_ms INTEGER DEFAULT 0,
                 success BOOLEAN DEFAULT 1,
                 error_message TEXT,
@@ -187,14 +187,14 @@ class AIProcessingLogRequest(BaseModel):
     """Request model for logging backend AI processing."""
     device_id: Optional[str] = None
     search_query: str
-    endpoint: str  # 'ai-extract', 'smart-search', 'match-products'
+    platform: Optional[str] = None  # Platform being scraped (Zepto, Blinkit, etc.)
+    endpoint: Optional[str] = None  # 'ai-extract', 'smart-search', 'match-products'
     ai_provider: str  # 'groq', 'mistral', 'gemini'
     ai_model: str  # 'mixtral-8x7b', 'gemini-pro', etc.
     fallback_reason: Optional[str] = None
-    input_products: int = 0
-    output_products: int = 0
-    filtered_out: int = 0
-    tokens_used: int = 0
+    input_html_size_kb: float = 0.0  # Size of HTML input
+    products_found: int = 0  # Products extracted
+    products_filtered: int = 0  # Products after filtering
     latency_ms: int = 0
     success: bool = True
     error_message: Optional[str] = None
@@ -508,14 +508,15 @@ def log_ai_processing(log: AIProcessingLogRequest) -> int:
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO ai_processing_logs (
-                device_id, search_query, platform, ai_provider, ai_model,
+                device_id, search_query, platform, endpoint, ai_provider, ai_model,
                 input_html_size_kb, products_found, products_filtered,
-                latency_ms, fallback_reason, success
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                latency_ms, fallback_reason, success, error_message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             log.device_id,
             log.search_query,
             log.platform,
+            log.endpoint,
             log.ai_provider,
             log.ai_model,
             log.input_html_size_kb,
@@ -523,7 +524,8 @@ def log_ai_processing(log: AIProcessingLogRequest) -> int:
             log.products_filtered,
             log.latency_ms,
             log.fallback_reason,
-            log.success
+            log.success,
+            log.error_message
         ))
         return cursor.lastrowid
 
