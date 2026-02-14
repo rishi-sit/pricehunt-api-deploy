@@ -9,10 +9,12 @@ This version:
 """
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel
 import os
 import time
+from pathlib import Path
 
 # AI-powered modules
 from app.smart_search import get_smart_search
@@ -1212,3 +1214,42 @@ async def get_combined_analytics(
             "success": False,
             "error": str(e)
         }
+
+
+# ============================================================================
+# Analytics Dashboard UI
+# ============================================================================
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def analytics_dashboard():
+    """
+    Serve the Analytics Dashboard UI.
+    
+    Access at: https://pricehunt-hklm.onrender.com/dashboard
+    
+    Features:
+    - Device selection dropdown
+    - Date range filtering
+    - Scrape source breakdown (Device vs AI Fallback vs Playwright)
+    - Platform-wise statistics
+    - AI provider usage stats (Groq vs Gemini vs Mistral)
+    - Recent logs table
+    """
+    try:
+        template_path = Path(__file__).parent / "app" / "templates" / "dashboard.html"
+        if not template_path.exists():
+            # Try alternate path
+            template_path = Path(__file__).parent / "templates" / "dashboard.html"
+        if not template_path.exists():
+            return HTMLResponse(
+                content="<h1>Dashboard template not found</h1><p>Please check deployment.</p>",
+                status_code=404
+            )
+        with open(template_path, "r") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        return HTMLResponse(
+            content=f"<h1>Error loading dashboard</h1><p>{str(e)}</p>",
+            status_code=500
+        )
