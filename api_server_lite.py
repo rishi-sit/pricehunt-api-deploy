@@ -979,7 +979,7 @@ from app.analytics import (
     AIProcessingLogRequest,
     log_scrape_event, log_bulk_events, get_dashboard_data,
     get_recent_logs, get_all_devices, log_ai_processing,
-    get_ai_processing_stats, get_combined_dashboard
+    get_ai_processing_stats, get_combined_dashboard, get_ai_quota_stats
 )
 
 
@@ -1124,6 +1124,35 @@ async def list_all_devices():
             "success": True,
             "devices": devices,
             "count": len(devices)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/analytics/ai-quota")
+async def get_ai_quota():
+    """
+    Get AI quota usage stats across ALL devices.
+    
+    Shows total hits per AI provider to track quota limits:
+    - Groq: 6000 requests/day free tier
+    - Mistral: ~10K requests/day (1B tokens/month)
+    - Gemini: 1500/day, 60/minute free tier
+    
+    Returns:
+    - Total requests all-time per provider
+    - Today's requests per provider
+    - Last hour requests (for rate limiting)
+    - Quota remaining estimates
+    """
+    try:
+        quota_stats = get_ai_quota_stats()
+        return {
+            "success": True,
+            "data": quota_stats
         }
     except Exception as e:
         return {

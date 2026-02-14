@@ -624,6 +624,7 @@ def get_combined_dashboard(
     
     scrape_dashboard = get_dashboard_data(device_id, start_date, end_date)
     ai_stats = get_ai_processing_stats(device_id, start_date, end_date)
+    quota_stats = get_ai_quota_stats()  # Add global quota stats
     
     return {
         "device_id": device_id,
@@ -632,8 +633,126 @@ def get_combined_dashboard(
             "end_date": end_date or date.today().isoformat()
         },
         "scrape_stats": scrape_dashboard.dict() if hasattr(scrape_dashboard, 'dict') else scrape_dashboard,
-        "ai_processing_stats": ai_stats
+        "ai_processing_stats": ai_stats,
+        "ai_quota_stats": quota_stats
     }
+
+
+def get_ai_quota_stats() -> Dict:
+    """
+    Get global AI quota usage stats across ALL devices and ALL time.
+    
+    Shows total hits per AI provider to help track quota limits:
+    - Groq: 6000 requests/day free tier
+    - Mistral: 1B tokens/month free tier  
+    - Gemini: 60 requests/minute, 1500/day free tier
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Get total hits per provider (all time)
+        cursor.execute("""
+            SELECT 
+                ai_provider,
+                ai_model,
+                COUNT(*) as total_requests,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful,
+                SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failed,
+                AVG(latency_ms) as avg_latency_ms,
+                SUM(products_found) as total_products,
+                MIN(created_at) as first_request,
+                MAX(created_at) as last_request
+            FROM ai_processing_logs
+            GROUP BY ai_provider, ai_model
+            ORDER BY total_requests DESC
+        """)
+        
+        provider_totals = [
+            {
+                "provider": row['ai_provider'],
+                "model": row['ai_model'],
+                "total_requests": row['total_requests'],
+                "successful": row['successful'],
+                "failed": row['failed'],
+                "success_rate": round((row['successful'] / row['total_requests'] * 100) if row['total_requests'] > 0 else 0, 1),
+                "avg_latency_ms": round(row['avg_latency_ms'] or 0, 1),
+                "total_products": row['total_products'] or 0,
+                "first_request": row['first_request'],
+                "last_request": row['last_request']
+            }
+            for row in cursor.fetchall()
+        ]
+        
+        # Get today's hits per provider (for daily quota tracking)
+        today = date.today().isoformat()
+        cursor.execute("""
+            SELECT 
+                ai_provider,
+                COUNT(*) as today_requests,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as today_successful
+            FROM ai_processing_logs
+            WHERE date(created_at) = ?
+            GROUP BY ai_provider
+        """, (today,))
+        
+        today_stats = {
+            row['ai_provider']: {
+                "today_requests": row['today_requests'],
+                "today_successful": row['today_successful']
+            }
+            for row in cursor.fetchall()
+        }
+        
+        # Get this hour's hits (for rate limiting awareness)
+        cursor.execute("""
+            SELECT 
+                ai_provider,
+                COUNT(*) as hour_requests
+            FROM ai_processing_logs
+            WHERE created_at >= datetime('now', '-1 hour')
+            GROUP BY ai_provider
+        """)
+        
+        hour_stats = {
+            row['ai_provider']: row['hour_requests']
+            for row in cursor.fetchall()
+        }
+        
+        # Get total across all providers
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_all_time,
+                SUM(CASE WHEN date(created_at) = ? THEN 1 ELSE 0 END) as total_today
+            FROM ai_processing_logs
+        """, (today,))
+        
+        totals = cursor.fetchone()
+        
+        # Known quota limits
+        quota_limits = {
+            "groq": {"daily": 6000, "description": "6000 requests/day free tier"},
+            "mistral": {"daily": 10000, "description": "~10K requests/day (1B tokens/month)"},
+            "gemini": {"daily": 1500, "per_minute": 60, "description": "1500/day, 60/minute free tier"}
+        }
+        
+        # Enrich provider totals with quota info
+        for provider in provider_totals:
+            pname = provider['provider'].lower()
+            provider['today_requests'] = today_stats.get(pname, {}).get('today_requests', 0)
+            provider['hour_requests'] = hour_stats.get(pname, 0)
+            if pname in quota_limits:
+                provider['quota_limit'] = quota_limits[pname]
+                daily_limit = quota_limits[pname].get('daily', 0)
+                today_used = provider['today_requests']
+                provider['quota_remaining'] = max(0, daily_limit - today_used)
+                provider['quota_percent_used'] = round((today_used / daily_limit * 100) if daily_limit > 0 else 0, 1)
+        
+        return {
+            "total_all_time": totals['total_all_time'] or 0,
+            "total_today": totals['total_today'] or 0,
+            "providers": provider_totals,
+            "quota_limits": quota_limits
+        }
 
 
 # Initialize database on module import

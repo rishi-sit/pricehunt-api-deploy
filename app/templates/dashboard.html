@@ -94,6 +94,26 @@
             </div>
         </div>
 
+        <!-- AI Quota Usage (Global) -->
+        <div class="card mb-6 fade-in">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold text-gray-800">🎯 AI Quota Usage (All Devices)</h3>
+                <div class="flex items-center gap-2 text-sm">
+                    <span class="text-gray-500">Total Today:</span>
+                    <span id="quotaTotalToday" class="font-bold text-purple-600">-</span>
+                    <span class="text-gray-400">|</span>
+                    <span class="text-gray-500">All Time:</span>
+                    <span id="quotaTotalAllTime" class="font-bold text-gray-700">-</span>
+                </div>
+            </div>
+            <div id="quotaCards" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <!-- Quota cards will be inserted here -->
+                <div class="bg-gray-50 rounded-lg p-4 text-center text-gray-400">
+                    Loading quota data...
+                </div>
+            </div>
+        </div>
+
         <!-- Charts Row -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
             <!-- Scrape Source Chart -->
@@ -305,17 +325,23 @@
             const endDate = document.getElementById('endDate').value;
 
             try {
-                // Fetch combined analytics
-                const [dashboardRes, logsRes] = await Promise.all([
+                // Fetch combined analytics + quota stats
+                const [dashboardRes, logsRes, quotaRes] = await Promise.all([
                     fetch(`${API_BASE}/api/analytics/combined/${currentDeviceId}?start_date=${startDate}&end_date=${endDate}`),
-                    fetch(`${API_BASE}/api/analytics/logs/${currentDeviceId}?limit=100`)
+                    fetch(`${API_BASE}/api/analytics/logs/${currentDeviceId}?limit=100`),
+                    fetch(`${API_BASE}/api/analytics/ai-quota`)
                 ]);
 
                 const dashboardData = await dashboardRes.json();
                 const logsData = await logsRes.json();
+                const quotaData = await quotaRes.json();
 
                 if (dashboardData.success) {
                     renderDashboard(dashboardData.data);
+                }
+
+                if (quotaData.success) {
+                    renderQuotaStats(quotaData.data);
                 }
 
                 if (logsData.success) {
@@ -380,6 +406,89 @@
             } else {
                 providerStatsDiv.innerHTML = '<p class="text-gray-400 text-sm">No AI processing data</p>';
             }
+        }
+
+        // Render AI Quota Stats
+        function renderQuotaStats(data) {
+            document.getElementById('quotaTotalToday').textContent = data.total_today || 0;
+            document.getElementById('quotaTotalAllTime').textContent = data.total_all_time || 0;
+
+            const quotaCards = document.getElementById('quotaCards');
+            const providers = data.providers || [];
+
+            if (providers.length === 0) {
+                quotaCards.innerHTML = `
+                    <div class="col-span-3 bg-gray-50 rounded-lg p-6 text-center">
+                        <p class="text-gray-400">No AI requests logged yet</p>
+                        <p class="text-gray-300 text-sm mt-1">Data will appear after AI processing occurs</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const providerColors = {
+                'groq': { bg: 'bg-blue-50', border: 'border-blue-400', text: 'text-blue-700', progress: 'bg-blue-500' },
+                'gemini': { bg: 'bg-purple-50', border: 'border-purple-400', text: 'text-purple-700', progress: 'bg-purple-500' },
+                'mistral': { bg: 'bg-orange-50', border: 'border-orange-400', text: 'text-orange-700', progress: 'bg-orange-500' }
+            };
+
+            quotaCards.innerHTML = providers.map(p => {
+                const colors = providerColors[p.provider.toLowerCase()] || { bg: 'bg-gray-50', border: 'border-gray-400', text: 'text-gray-700', progress: 'bg-gray-500' };
+                const quotaPercent = p.quota_percent_used || 0;
+                const progressColor = quotaPercent > 80 ? 'bg-red-500' : quotaPercent > 50 ? 'bg-yellow-500' : colors.progress;
+                const dailyLimit = p.quota_limit?.daily || '?';
+                const remaining = p.quota_remaining !== undefined ? p.quota_remaining : '?';
+
+                return `
+                    <div class="${colors.bg} rounded-lg p-4 border-l-4 ${colors.border}">
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <h4 class="font-bold ${colors.text} text-lg uppercase">${p.provider}</h4>
+                                <p class="text-xs text-gray-500">${p.model || 'unknown model'}</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-2xl font-bold ${colors.text}">${p.total_requests}</p>
+                                <p class="text-xs text-gray-400">all-time</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Daily Quota Progress -->
+                        <div class="mb-3">
+                            <div class="flex justify-between text-xs text-gray-500 mb-1">
+                                <span>Today: ${p.today_requests || 0} / ${dailyLimit}</span>
+                                <span>${remaining} remaining</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-2">
+                                <div class="${progressColor} h-2 rounded-full transition-all" style="width: ${Math.min(quotaPercent, 100)}%"></div>
+                            </div>
+                        </div>
+
+                        <!-- Stats Grid -->
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div class="bg-white/50 rounded p-2">
+                                <p class="text-gray-500">Success Rate</p>
+                                <p class="font-semibold ${p.success_rate >= 90 ? 'text-green-600' : p.success_rate >= 70 ? 'text-yellow-600' : 'text-red-600'}">${p.success_rate}%</p>
+                            </div>
+                            <div class="bg-white/50 rounded p-2">
+                                <p class="text-gray-500">Avg Latency</p>
+                                <p class="font-semibold">${p.avg_latency_ms}ms</p>
+                            </div>
+                            <div class="bg-white/50 rounded p-2">
+                                <p class="text-gray-500">Last Hour</p>
+                                <p class="font-semibold">${p.hour_requests || 0} reqs</p>
+                            </div>
+                            <div class="bg-white/50 rounded p-2">
+                                <p class="text-gray-500">Products</p>
+                                <p class="font-semibold">${p.total_products || 0}</p>
+                            </div>
+                        </div>
+
+                        ${p.quota_limit ? `
+                            <p class="text-xs text-gray-400 mt-2 text-center">${p.quota_limit.description}</p>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
         }
 
         // Render scrape source chart
