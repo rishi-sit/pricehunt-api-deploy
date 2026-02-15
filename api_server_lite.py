@@ -96,8 +96,8 @@ async def root():
     """API info"""
     return {
         "name": "PriceHunt API Lite",
-        "version": "2.1.0-lite",
-        "description": "AI-powered filtering + fallback scraping",
+        "version": "2.2.0-lite",
+        "description": "AI-powered filtering + fallback scraping + intelligent suggestions",
         "ai_enabled": gemini.is_available(),
         "ai_scraper_enabled": ai_scraper.is_available(),
         "endpoints": {
@@ -105,6 +105,7 @@ async def root():
             "match_products": "POST /api/match-products",
             "combined": "POST /api/smart-search-and-match",
             "understand_query": "GET /api/understand-query",
+            "suggestions": "GET /api/suggestions (NEW - intelligent search suggestions)",
             "ai_extract": "POST /api/ai-extract (NEW - fallback scraping)",
             "ai_extract_multi": "POST /api/ai-extract-multi (NEW - multi-platform)",
             "groq_ping": "GET /api/groq-ping",
@@ -1962,4 +1963,79 @@ async def session_pipeline_view():
         return HTMLResponse(
             content=f"<h1>Error loading session view</h1><p>{str(e)}</p>",
             status_code=500
+        )
+
+
+# ============== SUGGESTIONS API ==============
+
+class SuggestionsResponse(BaseModel):
+    """Response model for suggestions endpoint"""
+    query: str
+    category: Optional[str] = None
+    suggestions: List[str]
+    related: Optional[Dict[str, List[str]]] = None
+
+# Initialize suggestions engine lazily
+_suggestions_engine = None
+
+def get_suggestions_engine():
+    """Get or initialize suggestions engine"""
+    global _suggestions_engine
+    if _suggestions_engine is None:
+        from app.suggestions import SuggestionsEngine
+        _suggestions_engine = SuggestionsEngine()
+    return _suggestions_engine
+
+@app.get("/api/suggestions", response_model=SuggestionsResponse)
+async def get_suggestions(
+    query: str,
+    max_suggestions: int = 5,
+    pincode: str = "560001"
+):
+    """
+    Get intelligent search suggestions based on user query
+    
+    Features:
+    - Category-based suggestions (dairy, fruit, rice, oil, etc.)
+    - Smart disambiguation (apple fruit vs Apple tech)
+    - Search history integration
+    - Graceful fallback to local generation
+    
+    Args:
+        query: User's search query (e.g., "milk", "banana")
+        max_suggestions: Maximum number of suggestions to return
+        pincode: User's pincode for location-based suggestions
+    
+    Returns:
+        SuggestionsResponse with intelligent suggestions and related products
+    """
+    try:
+        engine = get_suggestions_engine()
+        
+        # Generate intelligent suggestions
+        suggestions = engine.generate_suggestions(query, max_suggestions)
+        category = engine.get_category(query)
+        related = engine.get_related_products(query)
+        
+        return SuggestionsResponse(
+            query=query,
+            category=category,
+            suggestions=suggestions,
+            related=related
+        )
+    except Exception as e:
+        # Fallback to basic suggestions if engine fails
+        basic_suggestions = [
+            f"{query} fresh",
+            f"{query} organic", 
+            f"{query} 1kg",
+            f"{query} best quality",
+            f"buy {query}"
+        ][:max_suggestions]
+        
+        return SuggestionsResponse(
+            query=query,
+            category=None,
+            suggestions=basic_suggestions,
+            related=None
         )
