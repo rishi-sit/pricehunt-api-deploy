@@ -492,7 +492,7 @@ async def health_check():
 from app.analytics import (
     ScrapeLogRequest, BulkLogRequest, DashboardQueryRequest,
     log_scrape_event, log_bulk_events, get_dashboard_data,
-    get_recent_logs, get_all_devices
+    get_recent_logs, get_all_devices, get_recent_sessions
 )
 
 
@@ -642,6 +642,38 @@ async def list_all_devices():
         return {
             "success": False,
             "error": str(e)
+        }
+
+
+@app.get("/api/analytics/recent-sessions")
+async def list_recent_sessions(
+    device_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 50
+):
+    """
+    Get recent search sessions for dashboard display.
+    
+    If device_id is None, returns sessions across ALL devices.
+    """
+    try:
+        sessions = get_recent_sessions(
+            device_id=device_id,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit
+        )
+        return {
+            "success": True,
+            "sessions": sessions,
+            "count": len(sessions)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "sessions": []
         }
 
 
