@@ -492,7 +492,8 @@ async def health_check():
 from app.analytics import (
     ScrapeLogRequest, BulkLogRequest, DashboardQueryRequest,
     log_scrape_event, log_bulk_events, get_dashboard_data,
-    get_recent_logs, get_all_devices, get_recent_sessions
+    get_recent_logs, get_all_devices, get_recent_sessions,
+    get_app_wide_stats, get_ai_quota_stats, get_combined_dashboard
 )
 
 
@@ -674,6 +675,73 @@ async def list_recent_sessions(
             "success": False,
             "error": str(e),
             "sessions": []
+        }
+
+
+@app.get("/api/analytics/app-wide")
+async def get_app_wide_analytics(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """
+    Get app-wide statistics across ALL devices.
+    Bird's eye view of the entire system.
+    """
+    try:
+        stats = get_app_wide_stats(start_date=start_date, end_date=end_date)
+        return {
+            "success": True,
+            **stats
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/analytics/ai-quota")
+async def get_ai_quota_analytics():
+    """
+    Get AI quota usage stats across all providers.
+    Useful for tracking API usage limits.
+    """
+    try:
+        stats = get_ai_quota_stats()
+        return {
+            "success": True,
+            **stats
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/analytics/combined/{device_id}")
+async def get_combined_analytics(
+    device_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """
+    Get combined dashboard with scrape logs and AI processing stats for a device.
+    """
+    try:
+        data = get_combined_dashboard(
+            device_id=device_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        return {
+            "success": True,
+            **data
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
         }
 
 
