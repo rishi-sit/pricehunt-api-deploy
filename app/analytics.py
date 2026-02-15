@@ -65,10 +65,14 @@ def get_db():
         yield conn
         conn.commit()
     except Exception as e:
-        conn.rollback()
+        # libsql may not have rollback
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
         raise e
     finally:
-        conn.close()
+        # libsql connections don't have close() method
+        if hasattr(conn, 'close'):
+            conn.close()
 
 
 def _get_id_column():
