@@ -4,5 +4,6 @@ uvicorn==0.27.0
 httpx==0.26.0
 pydantic==2.5.3
 fake_useragent==1.4.0
+beautifulsoup4==4.12.3
 # AI-powered smart search (Mistral AI default, Gemini fallback)
 # No SDK needed - using HTTP API directly for both providers
