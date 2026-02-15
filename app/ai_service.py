@@ -1612,29 +1612,87 @@ Examples:
 - "Grape Juice" = 15 ✗ (processed)
 """
 
-        # STRAWBERRY - processed products
-        elif query_lower == "strawberry":
+        # STRAWBERRY - STRICT: only fresh fruit, NOT flavored products
+        elif query_lower in ["strawberry", "strawberries"]:
             special_notes = """
-CRITICAL: User searched for "strawberry" (the fruit).
-Include ALL fresh strawberry products even with different names.
+CRITICAL: User searched for "strawberry" - they want the FRESH FRUIT, NOT flavored products!
 
-EXCLUDE (score 0-30):
-- "Strawberry Shake/Smoothie" - score 15
-- "Strawberry Jam/Jelly" - score 20
-- "Strawberry Ice Cream" - score 15
-- "Strawberry Flavoured" anything - score 10
+UNDERSTAND THE DIFFERENCE:
+- "Strawberry 200g" = FRESH FRUIT (user wants this!) = score 95-100
+- "Strawberry Yogurt" = YOGURT flavored with strawberry (NOT the fruit!) = score 0-15
+- "Strawberry Ice Cream" = ICE CREAM with strawberry flavor = score 0-15
+- "Strawberry Jam" = JAM made from strawberry = score 0-20
 
-INCLUDE (score 85-100):
-- Fresh strawberries: "Strawberry", "Strawberries", "Fresh Strawberry"
-- Premium/Organic variants: "Driscoll's Strawberries", "Premium Strawberries"
+RULE: If the product's PRIMARY category is NOT "fruit/produce", it's a flavored product - EXCLUDE IT!
 
-Examples:
-- "Fresh Strawberry 200g" = 95 ✓
-- "Fresh Strawberries Premium 250g" = 95 ✓
-- "Driscoll's Strawberries 454g" = 95 ✓ (IS fresh strawberry)
-- "American Strawberry 200g Pack" = 95 ✓
-- "Strawberry Shake" = 15 ✗ (beverage)
-- "Strawberry Jam" = 20 ✗ (processed)
+EXCLUDE (score 0-20) - These are FLAVORED PRODUCTS, not fresh fruit:
+- "Strawberry Yogurt/Yoghurt" - score 0 (it's yogurt, not strawberry!)
+- "Epigamia Strawberry Yogurt" - score 0 (it's yogurt!)
+- "Strawberry Shake/Smoothie" - score 0 (beverage)
+- "Strawberry Ice Cream" - score 0 (ice cream)
+- "Strawberry Jam/Jelly/Preserve" - score 15 (processed)
+- "Strawberry Cake/Pastry" - score 0 (baked goods)
+- "Strawberry Candy/Chocolate" - score 0 (confectionery)
+- "Strawberry Flavoured" anything - score 0
+
+INCLUDE (score 90-100) - Only FRESH STRAWBERRY FRUIT:
+- "Fresh Strawberry 200g" = 100 ✓
+- "Strawberries 250g" = 100 ✓
+- "Strawberry Pack 200g" = 98 ✓
+- "Driscoll's Strawberries" = 98 ✓
+- "American Strawberry" = 98 ✓
+- "Organic Strawberries" = 98 ✓
+- "Premium Strawberry Punnet" = 95 ✓
+
+KEY TEST: Does the product name include a NON-FRUIT word like yogurt/ice cream/jam/shake/cake?
+- If YES → EXCLUDE (score 0-20)
+- If NO → It's likely fresh fruit → INCLUDE (score 90-100)
+"""
+
+        # MANGO - similar to strawberry, avoid flavored products
+        elif query_lower in ["mango", "mangoes", "aam"]:
+            special_notes = """
+CRITICAL: User searched for "mango" - they want FRESH MANGO FRUIT, NOT flavored products!
+
+EXCLUDE (score 0-20) - FLAVORED/PROCESSED products:
+- "Mango Yogurt" - score 0 (it's yogurt!)
+- "Mango Ice Cream" - score 0 (ice cream)
+- "Mango Shake/Smoothie/Lassi" - score 0 (beverage)
+- "Mango Juice" - score 15 (processed)
+- "Mango Pickle/Achar" - score 10 (pickle)
+- "Mango Pulp/Puree" - score 15 (processed)
+- "Aam Panna" - score 10 (beverage)
+- "Mango Candy" - score 0 (confectionery)
+
+INCLUDE (score 90-100) - FRESH MANGO FRUIT:
+- "Fresh Mango" = 100 ✓
+- "Alphonso Mango" = 100 ✓
+- "Kesar Mango" = 100 ✓
+- "Hapus Mango" = 100 ✓
+- "Totapuri Mango" = 98 ✓
+- "Dasheri Mango" = 98 ✓
+- "Badami Mango" = 98 ✓
+- "Raw Mango/Kairi" = 95 ✓
+"""
+
+        # ORANGE - avoid juice and flavored products
+        elif query_lower in ["orange", "oranges", "santra"]:
+            special_notes = """
+CRITICAL: User searched for "orange" - they want FRESH ORANGE FRUIT, NOT juice or flavored products!
+
+EXCLUDE (score 0-20):
+- "Orange Juice" - score 0 (juice, not fruit!)
+- "Real/Tropicana Orange" - score 0 (juice!)
+- "Orange Squash" - score 0 (concentrate)
+- "Orange Candy" - score 0 (confectionery)
+- "Orange Ice Cream" - score 0
+
+INCLUDE (score 90-100) - FRESH ORANGE FRUIT:
+- "Fresh Orange" = 100 ✓
+- "Nagpur Orange" = 100 ✓
+- "Kinnow Orange" = 98 ✓
+- "Malta Orange" = 98 ✓
+- "Mandarin Orange" = 95 ✓
 """
 
         multi_word_note = ""
@@ -1687,17 +1745,19 @@ CRITICAL RULES:
 3. Processed/derived products are NOT the same as the base product (e.g., "banana chips" ≠ "banana")
 4. Wrong variants/flavors/types should be filtered out (e.g., "full cream milk" ≠ "double toned milk")
 5. PRIORITIZE exact matches: Fresh fruits/vegetables score HIGHEST (95-100), processed versions score LOW
+6. FLAVORED PRODUCTS ≠ ACTUAL PRODUCT: "Strawberry Yogurt" is YOGURT not strawberry! "Mango Ice Cream" is ICE CREAM not mango!
 
 EXAMPLES FOR SINGLE-WORD QUERIES:
 Query: "strawberry"
 - "Fresh Strawberry 200g" = 100 ✓ (IS strawberry fruit - HIGHEST priority)
 - "Strawberry Punnet 250g" = 98 ✓ (IS strawberry fruit)
 - "Organic Strawberries 500g" = 98 ✓ (IS strawberry fruit)
-- "Strawberry Jam" = 25 ✗ (processed - FILTER OUT)
-- "Strawberry Yogurt" = 20 ✗ (flavored product - FILTER OUT)
-- "Strawberry Cake" = 15 ✗ (baked product - FILTER OUT)
-- "Strawberry Ice Cream" = 15 ✗ (flavored product - FILTER OUT)
-- "Strawberry Shake" = 10 ✗ (beverage - FILTER OUT)
+- "Epigamia Strawberry Yogurt" = 0 ✗ (IT'S YOGURT, not strawberry! - FILTER OUT)
+- "Strawberry Yogurt" = 0 ✗ (IT'S YOGURT - FILTER OUT)
+- "Strawberry Jam" = 10 ✗ (processed - FILTER OUT)
+- "Strawberry Cake" = 0 ✗ (baked product - FILTER OUT)
+- "Strawberry Ice Cream" = 0 ✗ (ice cream - FILTER OUT)
+- "Strawberry Shake" = 0 ✗ (beverage - FILTER OUT)
 
 Query: "banana"
 - "Fresh Yellow Banana 6pc" = 100 ✓ (IS banana fruit - HIGHEST priority)
