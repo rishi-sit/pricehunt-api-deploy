@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-15T18:27:25.373046",
+  "timestamp": "2026-02-15T18:36:05.103438",
   "api_version": "2.2.0-lite",
   "results": [
     {
@@ -16,9 +16,9 @@
       "best_deal": "Mother Dairy Double Toned Milk 500ml",
       "best_deal_price": 25.0,
       "best_deal_correct": true,
-      "latency_ms": 1428,
+      "latency_ms": 3177,
       "ai_powered": true,
-      "ai_model": "gemini-2.5-flash-lite",
+      "ai_model": "mistral-small-latest",
       "result_products": [
         "Mother Dairy Double Toned Milk 500ml",
         "Heritage Milk 500ml",
@@ -46,9 +46,9 @@
       "best_deal": "Organic Banana 500g",
       "best_deal_price": 45.0,
       "best_deal_correct": true,
-      "latency_ms": 1299,
+      "latency_ms": 2530,
       "ai_powered": true,
-      "ai_model": "gemini-2.5-flash-lite",
+      "ai_model": "mistral-small-latest",
       "result_products": [
         "Organic Banana 500g",
         "Robusta Banana 1kg",
@@ -74,9 +74,9 @@
       "best_deal": "Green Apple Imported 500g",
       "best_deal_price": 145.0,
       "best_deal_correct": true,
-      "latency_ms": 1802,
+      "latency_ms": 2419,
       "ai_powered": true,
-      "ai_model": "gemini-2.5-flash-lite",
+      "ai_model": "mistral-small-latest",
       "result_products": [
         "Green Apple Imported 500g",
         "Washington Apple 4 pcs",
@@ -103,9 +103,9 @@
       "best_deal": "Black Grapes Premium 500g",
       "best_deal_price": 99.0,
       "best_deal_correct": true,
-      "latency_ms": 1187,
+      "latency_ms": 3028,
       "ai_powered": true,
-      "ai_model": "gemini-2.5-flash-lite",
+      "ai_model": "mistral-small-latest",
       "result_products": [
         "Black Grapes Premium 500g",
         "Thompson Grapes 1kg"
@@ -131,7 +131,7 @@
       "best_deal": "Daawat Brown Rice 1kg",
       "best_deal_price": 145.0,
       "best_deal_correct": true,
-      "latency_ms": 2683,
+      "latency_ms": 2312,
       "ai_powered": true,
       "ai_model": "mistral-small-latest",
       "result_products": [
