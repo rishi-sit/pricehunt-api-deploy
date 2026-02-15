@@ -1,0 +1,154 @@
+{
+  "timestamp": "2026-02-15T18:27:25.373046",
+  "api_version": "2.2.0-lite",
+  "results": [
+    {
+      "name": "Milk Search",
+      "query": "milk",
+      "input_products": 8,
+      "results": 4,
+      "filtered": 4,
+      "correct_accepts": 4,
+      "wrong_rejects": 1,
+      "correct_rejects": 3,
+      "wrong_accepts": 0,
+      "accuracy": 87.5,
+      "best_deal": "Mother Dairy Double Toned Milk 500ml",
+      "best_deal_price": 25.0,
+      "best_deal_correct": true,
+      "latency_ms": 1428,
+      "ai_powered": true,
+      "ai_model": "gemini-2.5-flash-lite",
+      "result_products": [
+        "Mother Dairy Double Toned Milk 500ml",
+        "Heritage Milk 500ml",
+        "Amul Gold Full Cream Milk 500ml",
+        "Nandini Goodlife Milk 1L"
+      ],
+      "filtered_products": [
+        "Amul Taaza Toned Milk 500ml",
+        "Cadbury Dairy Milk Chocolate 50g",
+        "Britannia Milk Bikis 90g",
+        "Nestle Milkmaid 400g"
+      ]
+    },
+    {
+      "name": "Banana Search",
+      "query": "banana",
+      "input_products": 6,
+      "results": 3,
+      "filtered": 3,
+      "correct_accepts": 3,
+      "wrong_rejects": 1,
+      "correct_rejects": 2,
+      "wrong_accepts": 0,
+      "accuracy": 83.33333333333334,
+      "best_deal": "Organic Banana 500g",
+      "best_deal_price": 45.0,
+      "best_deal_correct": true,
+      "latency_ms": 1299,
+      "ai_powered": true,
+      "ai_model": "gemini-2.5-flash-lite",
+      "result_products": [
+        "Organic Banana 500g",
+        "Robusta Banana 1kg",
+        "Red Banana 4 pcs"
+      ],
+      "filtered_products": [
+        "Fresh Yellow Banana 6 pcs",
+        "Banana Chips Salted 200g",
+        "Banana Shake Amul 200ml"
+      ]
+    },
+    {
+      "name": "Apple Search",
+      "query": "apple",
+      "input_products": 7,
+      "results": 3,
+      "filtered": 4,
+      "correct_accepts": 3,
+      "wrong_rejects": 1,
+      "correct_rejects": 3,
+      "wrong_accepts": 0,
+      "accuracy": 85.71428571428571,
+      "best_deal": "Green Apple Imported 500g",
+      "best_deal_price": 145.0,
+      "best_deal_correct": true,
+      "latency_ms": 1802,
+      "ai_powered": true,
+      "ai_model": "gemini-2.5-flash-lite",
+      "result_products": [
+        "Green Apple Imported 500g",
+        "Washington Apple 4 pcs",
+        "Fuji Apple 6 pcs"
+      ],
+      "filtered_products": [
+        "Shimla Apple Premium 1kg",
+        "Fresh Pineapple 1 pc",
+        "Real Apple Juice 1L",
+        "Apple Cider Vinegar 500ml"
+      ]
+    },
+    {
+      "name": "Grape Search",
+      "query": "grape",
+      "input_products": 6,
+      "results": 2,
+      "filtered": 4,
+      "correct_accepts": 2,
+      "wrong_rejects": 1,
+      "correct_rejects": 3,
+      "wrong_accepts": 0,
+      "accuracy": 83.33333333333334,
+      "best_deal": "Black Grapes Premium 500g",
+      "best_deal_price": 99.0,
+      "best_deal_correct": true,
+      "latency_ms": 1187,
+      "ai_powered": true,
+      "ai_model": "gemini-2.5-flash-lite",
+      "result_products": [
+        "Black Grapes Premium 500g",
+        "Thompson Grapes 1kg"
+      ],
+      "filtered_products": [
+        "Green Seedless Grapes 500g",
+        "Grapefruit 2 pcs",
+        "Grapeseed Oil 500ml",
+        "Grape Juice Real 1L"
+      ]
+    },
+    {
+      "name": "Rice Search",
+      "query": "rice",
+      "input_products": 5,
+      "results": 2,
+      "filtered": 3,
+      "correct_accepts": 2,
+      "wrong_rejects": 1,
+      "correct_rejects": 2,
+      "wrong_accepts": 0,
+      "accuracy": 80.0,
+      "best_deal": "Daawat Brown Rice 1kg",
+      "best_deal_price": 145.0,
+      "best_deal_correct": true,
+      "latency_ms": 2683,
+      "ai_powered": true,
+      "ai_model": "mistral-small-latest",
+      "result_products": [
+        "Daawat Brown Rice 1kg",
+        "Fortune Everyday Rice 5kg"
+      ],
+      "filtered_products": [
+        "India Gate Basmati Rice 1kg",
+        "Rice Bran Oil 1L",
+        "Rice Flour 500g"
+      ]
+    }
+  ],
+  "summary": {
+    "avg_accuracy": 83.97619047619048,
+    "best_deal_rate": 100.0,
+    "total_wrong_rejects": 5,
+    "total_wrong_accepts": 0
+  }
+}

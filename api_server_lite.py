@@ -7,20 +7,35 @@ This version:
 2. Uses Gemini AI for smart filtering and product matching
 3. Provides AI-powered HTML extraction as FALLBACK when client scraping fails
 """
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from typing import List, Dict, Optional, Any
-from pydantic import BaseModel
+import asyncio
+from dataclasses import asdict
 import os
 import time
 from pathlib import Path
+from typing import List, Dict, Optional, Any
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 # AI-powered modules
 from app.smart_search import get_smart_search
 from app.product_matcher import get_product_matcher
 from app.ai_service import get_ai_service as get_gemini_service
 from app.ai_scraper import get_ai_scraper
+from app.scrapers import (
+    AmazonScraper,
+    AmazonFreshScraper,
+    BlinkitScraper,
+    BigBasketScraper,
+    FlipkartScraper,
+    FlipkartMinutesScraper,
+    InstamartScraper,
+    JioMartQuickScraper,
+    JioMartScraper,
+    ZeptoScraper,
+)
 
 MAX_PLATFORM_ITEMS = 10
 
@@ -87,6 +102,13 @@ class MultiPlatformExtractRequest(BaseModel):
     platforms: List[Dict[str, str]]  # [{"platform": str, "html": str, "base_url": str}]
     search_query: str
     device_id: Optional[str] = None  # For analytics tracking
+
+
+class PlatformScrapeRequest(BaseModel):
+    """Request to scrape a single platform using backend Playwright."""
+    platform: str
+    query: str
+    pincode: str = "560001"
 
 
 # ============== API Endpoints ==============
@@ -1091,6 +1113,61 @@ async def ai_extract_multi_platform(request: MultiPlatformExtractRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/scrape/platform")
+async def scrape_platform(request: PlatformScrapeRequest):
+    """Scrape a single platform on the backend when device-side scrape fails."""
+    platform_map = {
+        "zepto": ZeptoScraper,
+        "blinkit": BlinkitScraper,
+        "bigbasket": BigBasketScraper,
+        "instamart": InstamartScraper,
+        "flipkart": FlipkartScraper,
+        "flipkart minutes": FlipkartMinutesScraper,
+        "amazon": AmazonScraper,
+        "amazon fresh": AmazonFreshScraper,
+        "jiomart": JioMartScraper,
+        "jiomart quick": JioMartQuickScraper,
+    }
+
+    platform_key = request.platform.lower().strip()
+    scraper_class = platform_map.get(platform_key)
+
+    if not scraper_class:
+        return {
+            "success": False,
+            "platform": request.platform,
+            "error": f"Unknown platform: {request.platform}",
+            "products": [],
+        }
+
+    try:
+        scraper = scraper_class(request.pincode)
+        results = await asyncio.wait_for(scraper.search(request.query), timeout=30.0)
+        products = [asdict(r) for r in results] if results else []
+
+        return {
+            "success": True,
+            "platform": request.platform,
+            "query": request.query,
+            "products": products,
+            "count": len(products),
+        }
+    except asyncio.TimeoutError:
+        return {
+            "success": False,
+            "platform": request.platform,
+            "error": "Timeout - platform took too long to respond",
+            "products": [],
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "platform": request.platform,
+            "error": f"Error: {str(e)}",
+            "products": [],
+        }
 
 
 @app.post("/api/smart-extract-and-filter")

@@ -1,0 +1,556 @@
+{
+  "timestamp": "2026-02-15T18:21:06.974808",
+  "api_version": "2.2.0-lite",
+  "scraping": {
+    "zepto": {
+      "success": 0,
+      "failed": 10,
+      "total_products": 0,
+      "queries": [
+        {
+          "query": "milk",
+          "count": 0,
+          "time_ms": 399,
+          "success": false
+        },
+        {
+          "query": "banana",
+          "count": 0,
+          "time_ms": 872,
+          "success": false
+        },
+        {
+          "query": "apple",
+          "count": 0,
+          "time_ms": 371,
+          "success": false
+        },
+        {
+          "query": "rice",
+          "count": 0,
+          "time_ms": 356,
+          "success": false
+        },
+        {
+          "query": "bread",
+          "count": 0,
+          "time_ms": 366,
+          "success": false
+        },
+        {
+          "query": "eggs",
+          "count": 0,
+          "time_ms": 357,
+          "success": false
+        },
+        {
+          "query": "tomato",
+          "count": 0,
+          "time_ms": 872,
+          "success": false
+        },
+        {
+          "query": "onion",
+          "count": 0,
+          "time_ms": 373,
+          "success": false
+        },
+        {
+          "query": "potato",
+          "count": 0,
+          "time_ms": 362,
+          "success": false
+        },
+        {
+          "query": "sugar",
+          "count": 0,
+          "time_ms": 385,
+          "success": false
+        }
+      ],
+      "success_rate": 0.0
+    },
+    "blinkit": {
+      "success": 0,
+      "failed": 10,
+      "total_products": 0,
+      "queries": [
+        {
+          "query": "milk",
+          "count": 0,
+          "time_ms": 360,
+          "success": false
+        },
+        {
+          "query": "banana",
+          "count": 0,
+          "time_ms": 369,
+          "success": false
+        },
+        {
+          "query": "apple",
+          "count": 0,
+          "time_ms": 390,
+          "success": false
+        },
+        {
+          "query": "rice",
+          "count": 0,
+          "time_ms": 381,
+          "success": false
+        },
+        {
+          "query": "bread",
+          "count": 0,
+          "time_ms": 372,
+          "success": false
+        },
+        {
+          "query": "eggs",
+          "count": 0,
+          "time_ms": 431,
+          "success": false
+        },
+        {
+          "query": "tomato",
+          "count": 0,
+          "time_ms": 421,
+          "success": false
+        },
+        {
+          "query": "onion",
+          "count": 0,
+          "time_ms": 864,
+          "success": false
+        },
+        {
+          "query": "potato",
+          "count": 0,
+          "time_ms": 893,
+          "success": false
+        },
+        {
+          "query": "sugar",
+          "count": 0,
+          "time_ms": 374,
+          "success": false
+        }
+      ],
+      "success_rate": 0.0
+    },
+    "instamart": {
+      "success": 0,
+      "failed": 10,
+      "total_products": 0,
+      "queries": [
+        {
+          "query": "milk",
+          "count": 0,
+          "time_ms": 388,
+          "success": false
+        },
+        {
+          "query": "banana",
+          "count": 0,
+          "time_ms": 442,
+          "success": false
+        },
+        {
+          "query": "apple",
+          "count": 0,
+          "time_ms": 427,
+          "success": false
+        },
+        {
+          "query": "rice",
+          "count": 0,
+          "time_ms": 394,
+          "success": false
+        },
+        {
+          "query": "bread",
+          "count": 0,
+          "time_ms": 390,
+          "success": false
+        },
+        {
+          "query": "eggs",
+          "count": 0,
+          "time_ms": 350,
+          "success": false
+        },
+        {
+          "query": "tomato",
+          "count": 0,
+          "time_ms": 916,
+          "success": false
+        },
+        {
+          "query": "onion",
+          "count": 0,
+          "time_ms": 400,
+          "success": false
+        },
+        {
+          "query": "potato",
+          "count": 0,
+          "time_ms": 372,
+          "success": false
+        },
+        {
+          "query": "sugar",
+          "count": 0,
+          "time_ms": 403,
+          "success": false
+        }
+      ],
+      "success_rate": 0.0
+    },
+    "bigbasket": {
+      "success": 0,
+      "failed": 10,
+      "total_products": 0,
+      "queries": [
+        {
+          "query": "milk",
+          "count": 0,
+          "time_ms": 462,
+          "success": false
+        },
+        {
+          "query": "banana",
+          "count": 0,
+          "time_ms": 373,
+          "success": false
+        },
+        {
+          "query": "apple",
+          "count": 0,
+          "time_ms": 395,
+          "success": false
+        },
+        {
+          "query": "rice",
+          "count": 0,
+          "time_ms": 356,
+          "success": false
+        },
+        {
+          "query": "bread",
+          "count": 0,
+          "time_ms": 387,
+          "success": false
+        },
+        {
+          "query": "eggs",
+          "count": 0,
+          "time_ms": 429,
+          "success": false
+        },
+        {
+          "query": "tomato",
+          "count": 0,
+          "time_ms": 390,
+          "success": false
+        },
+        {
+          "query": "onion",
+          "count": 0,
+          "time_ms": 384,
+          "success": false
+        },
+        {
+          "query": "potato",
+          "count": 0,
+          "time_ms": 351,
+          "success": false
+        },
+        {
+          "query": "sugar",
+          "count": 0,
+          "time_ms": 409,
+          "success": false
+        }
+      ],
+      "success_rate": 0.0
+    },
+    "jiomart": {
+      "success": 0,
+      "failed": 10,
+      "total_products": 0,
+      "queries": [
+        {
+          "query": "milk",
+          "count": 0,
+          "time_ms": 408,
+          "success": false
+        },
+        {
+          "query": "banana",
+          "count": 0,
+          "time_ms": 409,
+          "success": false
+        },
+        {
+          "query": "apple",
+          "count": 0,
+          "time_ms": 411,
+          "success": false
+        },
+        {
+          "query": "rice",
+          "count": 0,
+          "time_ms": 409,
+          "success": false
+        },
+        {
+          "query": "bread",
+          "count": 0,
+          "time_ms": 409,
+          "success": false
+        },
+        {
+          "query": "eggs",
+          "count": 0,
+          "time_ms": 418,
+          "success": false
+        },
+        {
+          "query": "tomato",
+          "count": 0,
+          "time_ms": 375,
+          "success": false
+        },
+        {
+          "query": "onion",
+          "count": 0,
+          "time_ms": 386,
+          "success": false
+        },
+        {
+          "query": "potato",
+          "count": 0,
+          "time_ms": 358,
+          "success": false
+        },
+        {
+          "query": "sugar",
+          "count": 0,
+          "time_ms": 379,
+          "success": false
+        }
+      ],
+      "success_rate": 0.0
+    },
+    "amazon_fresh": {
+      "success": 0,
+      "failed": 10,
+      "total_products": 0,
+      "queries": [
+        {
+          "query": "milk",
+          "count": 0,
+          "time_ms": 378,
+          "success": false
+        },
+        {
+          "query": "banana",
+          "count": 0,
+          "time_ms": 418,
+          "success": false
+        },
+        {
+          "query": "apple",
+          "count": 0,
+          "time_ms": 379,
+          "success": false
+        },
+        {
+          "query": "rice",
+          "count": 0,
+          "time_ms": 377,
+          "success": false
+        },
+        {
+          "query": "bread",
+          "count": 0,
+          "time_ms": 417,
+          "success": false
+        },
+        {
+          "query": "eggs",
+          "count": 0,
+          "time_ms": 407,
+          "success": false
+        },
+        {
+          "query": "tomato",
+          "count": 0,
+          "time_ms": 394,
+          "success": false
+        },
+        {
+          "query": "onion",
+          "count": 0,
+          "time_ms": 375,
+          "success": false
+        },
+        {
+          "query": "potato",
+          "count": 0,
+          "time_ms": 369,
+          "success": false
+        },
+        {
+          "query": "sugar",
+          "count": 0,
+          "time_ms": 380,
+          "success": false
+        }
+      ],
+      "success_rate": 0.0
+    },
+    "flipkart_minutes": {
+      "success": 0,
+      "failed": 10,
+      "total_products": 0,
+      "queries": [
+        {
+          "query": "milk",
+          "count": 0,
+          "time_ms": 376,
+          "success": false
+        },
+        {
+          "query": "banana",
+          "count": 0,
+          "time_ms": 379,
+          "success": false
+        },
+        {
+          "query": "apple",
+          "count": 0,
+          "time_ms": 386,
+          "success": false
+        },
+        {
+          "query": "rice",
+          "count": 0,
+          "time_ms": 383,
+          "success": false
+        },
+        {
+          "query": "bread",
+          "count": 0,
+          "time_ms": 360,
+          "success": false
+        },
+        {
+          "query": "eggs",
+          "count": 0,
+          "time_ms": 379,
+          "success": false
+        },
+        {
+          "query": "tomato",
+          "count": 0,
+          "time_ms": 926,
+          "success": false
+        },
+        {
+          "query": "onion",
+          "count": 0,
+          "time_ms": 391,
+          "success": false
+        },
+        {
+          "query": "potato",
+          "count": 0,
+          "time_ms": 388,
+          "success": false
+        },
+        {
+          "query": "sugar",
+          "count": 0,
+          "time_ms": 441,
+          "success": false
+        }
+      ],
+      "success_rate": 0.0
+    }
+  },
+  "accuracy": [
+    {
+      "query": "strawberry",
+      "total_products": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "precision": 0,
+      "best_deal_correct": false,
+      "time_ms": 350
+    },
+    {
+      "query": "banana",
+      "total_products": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "precision": 0,
+      "best_deal_correct": false,
+      "time_ms": 594
+    },
+    {
+      "query": "milk",
+      "total_products": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "precision": 0,
+      "best_deal_correct": false,
+      "time_ms": 624
+    },
+    {
+      "query": "apple",
+      "total_products": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "precision": 0,
+      "best_deal_correct": false,
+      "time_ms": 422
+    },
+    {
+      "query": "grape",
+      "total_products": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "precision": 0,
+      "best_deal_correct": false,
+      "time_ms": 353
+    },
+    {
+      "query": "mango",
+      "total_products": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "precision": 0,
+      "best_deal_correct": false,
+      "time_ms": 381
+    },
+    {
+      "query": "tomato",
+      "total_products": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "precision": 0,
+      "best_deal_correct": false,
+      "time_ms": 388
+    },
+    {
+      "query": "eggs",
+      "total_products": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "precision": 0,
+      "best_deal_correct": false,
+      "time_ms": 370
+    }
+  ]
+}
