@@ -405,6 +405,80 @@ async def scrape_platform(request: PlatformScrapeRequest):
         }
 
 
+# ========== SMART SUGGESTIONS ==========
+
+from app.suggestions import get_suggestions_engine
+from app.analytics import conn as analytics_conn
+
+
+@app.get("/api/suggestions")
+async def get_suggestions(
+    query: str = Query(..., description="Search query to get suggestions for"),
+    max_suggestions: int = Query(5, ge=1, le=10, description="Maximum number of suggestions to return"),
+    pincode: str = Query("560001", description="User's pincode for location-specific suggestions")
+):
+    """
+    Get intelligent search suggestions for a query.
+    
+    Returns suggestions based on:
+    - Product category detection
+    - Related products (fresh, organic, variants)
+    - Derivative products (juice, jam, chips, etc.)
+    - Search history and popular searches
+    
+    Example:
+        GET /api/suggestions?query=milk&max_suggestions=5
+        
+    Response:
+        {
+            "query": "milk",
+            "category": "dairy",
+            "suggestions": [
+                "milk full cream",
+                "milk toned",
+                "milk organic",
+                "amul milk",
+                "mother dairy milk"
+            ],
+            "related": {
+                "variants": ["milk full cream", "milk toned", "milk organic"],
+                "derivatives": ["yogurt", "cheese", "butter"],
+                "alternatives": ["amul milk", "mother dairy milk"]
+            }
+        }
+    """
+    try:
+        # Get suggestions engine with analytics database
+        engine = get_suggestions_engine(db_path="app/analytics.db")
+        
+        suggestions = engine.generate_suggestions(
+            query=query,
+            max_suggestions=max_suggestions,
+            include_history=True,
+            pincode=pincode
+        )
+        
+        # Get category and related products
+        category = engine.get_category(query)
+        related = engine.get_related_products(query, max_related=4)
+        
+        return {
+            "query": query,
+            "category": category,
+            "suggestions": suggestions,
+            "related": related
+        }
+    except Exception as e:
+        # If suggestions fail, return empty suggestions instead of error
+        return {
+            "query": query,
+            "category": None,
+            "suggestions": [],
+            "related": {"variants": [], "derivatives": [], "alternatives": []},
+            "error": str(e)
+        }
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
