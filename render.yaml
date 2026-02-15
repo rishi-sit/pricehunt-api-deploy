@@ -4,9 +4,16 @@ services:
     env: python
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn api_server_lite:app --host 0.0.0.0 --port $PORT"
+    # Persist analytics + logs across deploys
+    disk:
+      name: pricehunt-data
+      mountPath: /data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: GEMINI_API_KEY
         sync: false  # Set this manually in Render dashboard
+      - key: ANALYTICS_DB_PATH
+        value: /data/pricehunt_analytics.db
     plan: free
