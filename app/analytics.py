@@ -64,9 +64,17 @@ def row_to_dict(cursor, row):
     # If already dict-like (sqlite3.Row), convert to dict
     if hasattr(row, 'keys'):
         return dict(row)
-    # For tuples (Turso), use cursor.description
-    columns = [desc[0] for desc in cursor.description]
-    return dict(zip(columns, row))
+    # For Turso/libsql, the row might have column_names or be a Row object
+    if hasattr(row, '_fields'):  # namedtuple
+        return row._asdict()
+    if hasattr(row, 'column_names'):  # Some Row objects
+        return dict(zip(row.column_names, row))
+    # Check if cursor has description
+    if cursor.description:
+        columns = [desc[0] for desc in cursor.description]
+        return dict(zip(columns, row))
+    # Last resort: return indexed dict
+    return {i: v for i, v in enumerate(row)}
 
 
 def fetchall_as_dicts(cursor):
@@ -74,12 +82,27 @@ def fetchall_as_dicts(cursor):
     rows = cursor.fetchall()
     if not rows:
         return []
-    return [row_to_dict(cursor, row) for row in rows]
+    # Check if rows are already dict-like
+    first_row = rows[0]
+    if hasattr(first_row, 'keys'):
+        return [dict(r) for r in rows]
+    if hasattr(first_row, '_fields'):  # namedtuple
+        return [r._asdict() for r in rows]
+    if hasattr(first_row, 'asdict'):
+        return [r.asdict() for r in rows]
+    # For libsql, rows might have column info
+    if cursor.description:
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, r)) for r in rows]
+    # Last resort
+    return [row_to_dict(cursor, r) for r in rows]
 
 
 def fetchone_as_dict(cursor):
     """Fetch one row as dict."""
     row = cursor.fetchone()
+    if row is None:
+        return {}
     return row_to_dict(cursor, row)
 
 

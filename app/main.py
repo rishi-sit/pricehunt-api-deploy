@@ -719,6 +719,43 @@ async def get_ai_quota_analytics():
         }
 
 
+@app.get("/api/analytics/debug-db")
+async def debug_db():
+    """Debug endpoint to check DB row format."""
+    from app.analytics import get_db, get_cursor
+    try:
+        with get_db() as conn:
+            cursor = get_cursor(conn)
+            cursor.execute("SELECT COUNT(*) as cnt FROM scrape_logs")
+            row = cursor.fetchone()
+            
+            # Collect info about row structure
+            row_info = {
+                "row_type": str(type(row)),
+                "row_repr": repr(row)[:200],
+                "has_keys": hasattr(row, 'keys'),
+                "has_fields": hasattr(row, '_fields'),
+                "has_asdict": hasattr(row, 'asdict'),
+                "cursor_description": [str(d) for d in cursor.description] if cursor.description else None,
+            }
+            
+            # Try to access with index
+            try:
+                row_info["index_0"] = str(row[0])
+            except:
+                row_info["index_0"] = "failed"
+            
+            # Try dict-like access
+            try:
+                row_info["dict_cnt"] = str(row['cnt'])
+            except Exception as e:
+                row_info["dict_cnt_error"] = str(e)
+            
+            return {"success": True, **row_info}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @app.get("/api/analytics/combined/{device_id}")
 async def get_combined_analytics(
     device_id: str,
