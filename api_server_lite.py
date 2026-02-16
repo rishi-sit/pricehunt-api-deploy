@@ -1670,7 +1670,7 @@ async def debug_db():
             except Exception as e:
                 row_info["helper_error"] = str(e)
             
-            return {"success": True, "deployed": "v6-smartcursor", **row_info}
+            return {"success": True, "deployed": "v7-select-star-fix", **row_info}
     except Exception as e:
         import traceback
         return {"success": False, "error": str(e), "tb": traceback.format_exc()}
