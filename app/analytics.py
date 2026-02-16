@@ -41,14 +41,55 @@ else:
 import re
 
 
-def extract_column_names(sql: str) -> list:
+# Table schemas for SELECT * resolution (libsql doesn't support cursor.description)
+TABLE_SCHEMAS = {
+    'search_sessions': [
+        'id', 'session_id', 'device_id', 'search_query', 'pincode',
+        'started_at', 'completed_at', 'total_latency_ms', 'total_platforms',
+        'successful_platforms', 'failed_platforms', 'total_products_found',
+        'relevant_products', 'filtered_out_products', 'best_deal_platform',
+        'best_deal_product', 'best_deal_price', 'ai_calls_gemini', 'ai_calls_groq',
+        'ai_calls_mistral', 'total_ai_calls', 'ai_fallback_count', 'metadata', 'status', 'created_at'
+    ],
+    'platform_scrape_events': [
+        'id', 'session_id', 'platform', 'scrape_source', 'started_at', 'completed_at',
+        'latency_ms', 'success', 'error_message', 'products_found', 'products_relevant',
+        'html_size_kb', 'endpoint_used', 'metadata', 'created_at'
+    ],
+    'ai_processing_events': [
+        'id', 'session_id', 'platform', 'ai_provider', 'ai_model', 'started_at',
+        'completed_at', 'latency_ms', 'input_tokens', 'output_tokens', 'products_extracted',
+        'products_relevant', 'success', 'error_message', 'fallback_from', 'metadata', 'created_at'
+    ],
+    'scrape_logs': [
+        'id', 'device_id', 'query', 'platform', 'scrape_source', 'html_size_kb',
+        'products_scraped', 'products_relevant', 'latency_ms', 'success', 'error_message', 'created_at'
+    ],
+    'ai_processing_logs': [
+        'id', 'device_id', 'search_query', 'platform', 'endpoint', 'ai_provider',
+        'ai_model', 'input_html_size_kb', 'products_found', 'products_filtered',
+        'latency_ms', 'fallback_reason', 'success', 'error_message', 'created_at'
+    ]
+}
+
+
+def extract_column_names(sql: str, table_schemas: dict = TABLE_SCHEMAS) -> list:
     """
     Extract column names/aliases from a SELECT SQL query.
-    Handles: SELECT col1, col2 AS alias, COUNT(*) as cnt, ...
+    Handles: SELECT col1, col2 AS alias, COUNT(*) as cnt, SELECT * FROM table
     Required because libsql doesn't support cursor.description.
     """
     # Remove newlines and extra spaces
     sql = ' '.join(sql.split())
+    
+    # Handle SELECT * FROM table_name
+    star_match = re.search(r'SELECT\s+\*\s+FROM\s+(\w+)', sql, re.IGNORECASE)
+    if star_match:
+        table_name = star_match.group(1).lower()
+        if table_name in table_schemas:
+            return table_schemas[table_name]
+        # Unknown table, can't resolve columns
+        return []
     
     # Find SELECT ... FROM portion
     match = re.search(r'SELECT\s+(.+?)\s+FROM', sql, re.IGNORECASE)
@@ -978,6 +1019,34 @@ def get_all_devices() -> List[Dict[str, Any]]:
     """Get list of all devices with their last activity."""
     with get_db() as conn:
         cursor = get_cursor(conn)
+        
+        # Get devices from search_sessions (primary source)
+        cursor.execute("""
+            SELECT 
+                device_id,
+                COUNT(*) as total_sessions,
+                MAX(started_at) as last_activity,
+                COUNT(DISTINCT date(started_at)) as active_days,
+                SUM(total_products_found) as total_products,
+                SUM(relevant_products) as total_relevant
+            FROM search_sessions
+            GROUP BY device_id
+            ORDER BY last_activity DESC
+        """)
+        
+        devices = {}
+        for row in fetchall_as_dicts(cursor):
+            devices[row['device_id']] = {
+                "device_id": row['device_id'],
+                "total_sessions": row['total_sessions'] or 0,
+                "total_logs": row['total_sessions'] or 0,  # Alias for compatibility
+                "last_activity": row['last_activity'],
+                "active_days": row['active_days'] or 0,
+                "total_products": row['total_products'] or 0,
+                "total_relevant": row['total_relevant'] or 0
+            }
+        
+        # Also get devices from scrape_logs (legacy)
         cursor.execute("""
             SELECT 
                 device_id,
@@ -986,18 +1055,29 @@ def get_all_devices() -> List[Dict[str, Any]]:
                 COUNT(DISTINCT date(created_at)) as active_days
             FROM scrape_logs
             GROUP BY device_id
-            ORDER BY last_activity DESC
         """)
         
-        return [
-            {
-                "device_id": row['device_id'],
-                "total_logs": row['total_logs'],
-                "last_activity": row['last_activity'],
-                "active_days": row['active_days']
-            }
-            for row in fetchall_as_dicts(cursor)
-        ]
+        for row in fetchall_as_dicts(cursor):
+            device_id = row['device_id']
+            if device_id not in devices:
+                devices[device_id] = {
+                    "device_id": device_id,
+                    "total_sessions": 0,
+                    "total_logs": row['total_logs'] or 0,
+                    "last_activity": row['last_activity'],
+                    "active_days": row['active_days'] or 0,
+                    "total_products": 0,
+                    "total_relevant": 0
+                }
+            else:
+                # Merge - take more recent activity
+                existing = devices[device_id]
+                existing['total_logs'] += (row['total_logs'] or 0)
+                if row['last_activity'] and (not existing['last_activity'] or row['last_activity'] > existing['last_activity']):
+                    existing['last_activity'] = row['last_activity']
+        
+        # Return as sorted list
+        return sorted(devices.values(), key=lambda x: x.get('last_activity') or '', reverse=True)
 
 
 def log_ai_processing(log: AIProcessingLogRequest) -> int:
