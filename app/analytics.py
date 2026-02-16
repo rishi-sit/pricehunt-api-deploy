@@ -38,6 +38,122 @@ else:
     print(f"[Analytics] Using SQLite database: {DB_PATH}")
 
 
+import re
+
+
+def extract_column_names(sql: str) -> list:
+    """
+    Extract column names/aliases from a SELECT SQL query.
+    Handles: SELECT col1, col2 AS alias, COUNT(*) as cnt, ...
+    Required because libsql doesn't support cursor.description.
+    """
+    # Remove newlines and extra spaces
+    sql = ' '.join(sql.split())
+    
+    # Find SELECT ... FROM portion
+    match = re.search(r'SELECT\s+(.+?)\s+FROM', sql, re.IGNORECASE)
+    if not match:
+        # Maybe no FROM (e.g., SELECT 1 as test)
+        match = re.search(r'SELECT\s+(.+?)(?:\s*$|\s+WHERE|\s+GROUP|\s+ORDER|\s+LIMIT)', sql, re.IGNORECASE)
+    
+    if not match:
+        return []
+    
+    columns_str = match.group(1)
+    
+    # Split by comma, but not inside parentheses
+    columns = []
+    depth = 0
+    current = ""
+    for char in columns_str:
+        if char == '(':
+            depth += 1
+            current += char
+        elif char == ')':
+            depth -= 1
+            current += char
+        elif char == ',' and depth == 0:
+            columns.append(current.strip())
+            current = ""
+        else:
+            current += char
+    if current.strip():
+        columns.append(current.strip())
+    
+    # Extract name or alias from each column
+    names = []
+    for col in columns:
+        col = col.strip()
+        # Check for AS alias (case insensitive)
+        as_match = re.search(r'\s+[Aa][Ss]\s+(\w+)\s*$', col)
+        if as_match:
+            names.append(as_match.group(1))
+        else:
+            # Take last word (handles "table.column" -> "column")
+            # But avoid function names without alias
+            if '(' in col and ')' in col:
+                # It's a function without alias - generate name
+                names.append(f"col{len(names)}")
+            else:
+                parts = col.replace('.', ' ').split()
+                names.append(parts[-1] if parts else f"col{len(names)}")
+    
+    return names
+
+
+class SmartCursor:
+    """
+    Wrapper around cursor that tracks the last SQL query
+    and can extract column names for dict conversion.
+    Needed because libsql doesn't support cursor.description.
+    """
+    def __init__(self, cursor):
+        self._cursor = cursor
+        self._last_sql = None
+        self._columns = None
+    
+    def execute(self, sql, params=None):
+        self._last_sql = sql
+        self._columns = extract_column_names(sql)
+        if params:
+            return self._cursor.execute(sql, params)
+        return self._cursor.execute(sql)
+    
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_dict(row)
+    
+    def fetchall(self):
+        rows = self._cursor.fetchall()
+        if not rows:
+            return []
+        return [self._row_to_dict(r) for r in rows]
+    
+    def _row_to_dict(self, row):
+        # If already dict-like
+        if hasattr(row, 'keys'):
+            return dict(row)
+        if hasattr(row, '_fields'):
+            return row._asdict()
+        
+        # Use extracted column names
+        if self._columns and len(self._columns) == len(row):
+            return dict(zip(self._columns, row))
+        
+        # Fallback to numeric keys
+        return {i: v for i, v in enumerate(row)}
+    
+    @property
+    def lastrowid(self):
+        return self._cursor.lastrowid
+    
+    @property
+    def description(self):
+        return self._cursor.description
+
+
 def dict_factory(cursor, row):
     """Row factory that returns dicts instead of tuples."""
     if cursor.description:
@@ -65,7 +181,10 @@ def get_db_connection():
 
 def get_cursor(conn):
     """Get cursor with proper row factory."""
-    # For both Turso (libsql) and SQLite, we use standard cursor
+    # Use SmartCursor for Turso since libsql doesn't support cursor.description
+    if USE_TURSO:
+        return SmartCursor(conn.cursor())
+    # SQLite with Row factory works fine with regular cursor
     return conn.cursor()
 
 
@@ -91,10 +210,11 @@ def row_to_dict(cursor, row):
 
 def fetchall_as_dicts(cursor):
     """Fetch all rows as list of dicts."""
-    # IMPORTANT: Get description BEFORE fetching rows
-    # Some drivers clear description after fetch
-    description = cursor.description
+    # If using SmartCursor, fetchall() already returns dicts
+    if isinstance(cursor, SmartCursor):
+        return cursor.fetchall()
     
+    # For SQLite with row_factory, rows are already dict-like
     rows = cursor.fetchall()
     if not rows:
         return []
@@ -105,56 +225,30 @@ def fetchall_as_dicts(cursor):
         return [dict(r) for r in rows]
     if hasattr(first_row, '_fields'):  # namedtuple
         return [r._asdict() for r in rows]
-    if hasattr(first_row, 'asdict'):
-        return [r.asdict() for r in rows]
     
-    # For libsql/Turso, build dicts from description
-    if description:
-        columns = [desc[0] for desc in description]
-        result = []
-        for r in rows:
-            # Handle different row types
-            if isinstance(r, (list, tuple)):
-                result.append(dict(zip(columns, r)))
-            else:
-                # Try to iterate the row
-                try:
-                    result.append(dict(zip(columns, list(r))))
-                except:
-                    result.append({columns[i]: r[i] for i in range(len(columns))})
-        return result
-    
-    # Last resort: numbered keys
+    # Fallback: numbered keys
     return [{i: v for i, v in enumerate(r)} for r in rows]
 
 
 def fetchone_as_dict(cursor):
     """Fetch one row as dict."""
-    # Get description BEFORE fetching
-    description = cursor.description
+    # If using SmartCursor, fetchone() already returns dict
+    if isinstance(cursor, SmartCursor):
+        result = cursor.fetchone()
+        return result if result is not None else {}
     
     row = cursor.fetchone()
     if row is None:
         return {}
     
-    # If already dict-like
+    # For SQLite with row_factory, row is already dict-like
     if hasattr(row, 'keys'):
         return dict(row)
     if hasattr(row, '_fields'):  # namedtuple
         return row._asdict()
     
-    # Use description to build dict
-    if description:
-        columns = [desc[0] for desc in description]
-        if isinstance(row, (list, tuple)):
-            return dict(zip(columns, row))
-        try:
-            return dict(zip(columns, list(row)))
-        except:
-            return {columns[i]: row[i] for i in range(len(columns))}
-    
-    # Last resort
-    return row_to_dict(cursor, row)
+    # Fallback: numbered keys
+    return {i: v for i, v in enumerate(row)}
 
 
 @contextmanager
