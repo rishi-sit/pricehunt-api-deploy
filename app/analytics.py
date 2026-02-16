@@ -91,9 +91,14 @@ def row_to_dict(cursor, row):
 
 def fetchall_as_dicts(cursor):
     """Fetch all rows as list of dicts."""
+    # IMPORTANT: Get description BEFORE fetching rows
+    # Some drivers clear description after fetch
+    description = cursor.description
+    
     rows = cursor.fetchall()
     if not rows:
         return []
+    
     # Check if rows are already dict-like
     first_row = rows[0]
     if hasattr(first_row, 'keys'):
@@ -102,19 +107,53 @@ def fetchall_as_dicts(cursor):
         return [r._asdict() for r in rows]
     if hasattr(first_row, 'asdict'):
         return [r.asdict() for r in rows]
-    # For libsql, rows might have column info
-    if cursor.description:
-        columns = [desc[0] for desc in cursor.description]
-        return [dict(zip(columns, r)) for r in rows]
-    # Last resort
-    return [row_to_dict(cursor, r) for r in rows]
+    
+    # For libsql/Turso, build dicts from description
+    if description:
+        columns = [desc[0] for desc in description]
+        result = []
+        for r in rows:
+            # Handle different row types
+            if isinstance(r, (list, tuple)):
+                result.append(dict(zip(columns, r)))
+            else:
+                # Try to iterate the row
+                try:
+                    result.append(dict(zip(columns, list(r))))
+                except:
+                    result.append({columns[i]: r[i] for i in range(len(columns))})
+        return result
+    
+    # Last resort: numbered keys
+    return [{i: v for i, v in enumerate(r)} for r in rows]
 
 
 def fetchone_as_dict(cursor):
     """Fetch one row as dict."""
+    # Get description BEFORE fetching
+    description = cursor.description
+    
     row = cursor.fetchone()
     if row is None:
         return {}
+    
+    # If already dict-like
+    if hasattr(row, 'keys'):
+        return dict(row)
+    if hasattr(row, '_fields'):  # namedtuple
+        return row._asdict()
+    
+    # Use description to build dict
+    if description:
+        columns = [desc[0] for desc in description]
+        if isinstance(row, (list, tuple)):
+            return dict(zip(columns, row))
+        try:
+            return dict(zip(columns, list(row)))
+        except:
+            return {columns[i]: row[i] for i in range(len(columns))}
+    
+    # Last resort
     return row_to_dict(cursor, row)
 
 
