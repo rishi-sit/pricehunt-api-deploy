@@ -57,6 +57,32 @@ def get_cursor(conn):
     return conn.cursor()
 
 
+def row_to_dict(cursor, row):
+    """Convert a row (tuple or Row) to a dict using cursor.description."""
+    if row is None:
+        return None
+    # If already dict-like (sqlite3.Row), convert to dict
+    if hasattr(row, 'keys'):
+        return dict(row)
+    # For tuples (Turso), use cursor.description
+    columns = [desc[0] for desc in cursor.description]
+    return dict(zip(columns, row))
+
+
+def fetchall_as_dicts(cursor):
+    """Fetch all rows as list of dicts."""
+    rows = cursor.fetchall()
+    if not rows:
+        return []
+    return [row_to_dict(cursor, row) for row in rows]
+
+
+def fetchone_as_dict(cursor):
+    """Fetch one row as dict."""
+    row = cursor.fetchone()
+    return row_to_dict(cursor, row)
+
+
 @contextmanager
 def get_db():
     """Context manager for database connections."""
@@ -658,7 +684,7 @@ def get_dashboard_data(
             ORDER BY total_searches DESC
         """, (device_id, start_date, end_date))
         
-        platform_rows = cursor.fetchall()
+        platform_rows = fetchall_as_dicts(cursor)
         platform_stats = []
         total_searches = 0
         total_products = 0
@@ -695,7 +721,7 @@ def get_dashboard_data(
             GROUP BY ai_model
         """, (device_id, start_date, end_date))
         
-        ai_model_usage = {row['model']: row['count'] for row in cursor.fetchall()}
+        ai_model_usage = {row['model']: row['count'] for row in fetchall_as_dicts(cursor)}
         
         # Get scrape source breakdown
         cursor.execute("""
@@ -709,7 +735,7 @@ def get_dashboard_data(
             GROUP BY scrape_source
         """, (device_id, start_date, end_date))
         
-        scrape_source_breakdown = {row['scrape_source']: row['count'] for row in cursor.fetchall()}
+        scrape_source_breakdown = {row['scrape_source']: row['count'] for row in fetchall_as_dicts(cursor)}
         
         # Calculate overall success rate
         cursor.execute("""
@@ -720,7 +746,7 @@ def get_dashboard_data(
               AND date(created_at) <= date(?)
         """, (device_id, start_date, end_date))
         
-        overall_success_rate = cursor.fetchone()['overall_success_rate'] or 0.0
+        overall_success_rate = fetchone_as_dict(cursor)['overall_success_rate'] or 0.0
         
         return DashboardResponse(
             device_id=device_id,
@@ -776,7 +802,7 @@ def get_recent_logs(
                 pincode=row['pincode'],
                 created_at=row['created_at']
             )
-            for row in cursor.fetchall()
+            for row in fetchall_as_dicts(cursor)
         ]
 
 
@@ -802,7 +828,7 @@ def get_all_devices() -> List[Dict[str, Any]]:
                 "last_activity": row['last_activity'],
                 "active_days": row['active_days']
             }
-            for row in cursor.fetchall()
+            for row in fetchall_as_dicts(cursor)
         ]
 
 
@@ -863,7 +889,7 @@ def get_ai_processing_stats(
               AND date(created_at) BETWEEN ? AND ?
         """, (device_id, start_date, end_date))
         
-        totals = cursor.fetchone()
+        totals = fetchone_as_dict(cursor)
         
         # Get stats by AI provider
         cursor.execute("""
@@ -889,7 +915,7 @@ def get_ai_processing_stats(
                 "products_found": row['products_found'],
                 "success_rate": (row['success_count'] / row['requests'] * 100) if row['requests'] > 0 else 0
             }
-            for row in cursor.fetchall()
+            for row in fetchall_as_dicts(cursor)
         ]
         
         # Get fallback reasons
@@ -906,7 +932,7 @@ def get_ai_processing_stats(
         
         fallback_reasons = [
             {"reason": row['fallback_reason'], "count": row['count']}
-            for row in cursor.fetchall()
+            for row in fetchall_as_dicts(cursor)
         ]
         
         return {
@@ -1017,7 +1043,7 @@ def get_ai_model_accuracy_stats(
         """, (start_date, end_date))
         
         model_stats = []
-        for row in cursor.fetchall():
+        for row in fetchall_as_dicts(cursor):
             total_kept = row['total_kept'] or 0
             high_rel = row['high_relevance_total'] or 0
             total_calls = row['total_calls'] or 0
@@ -1127,7 +1153,7 @@ def get_ai_quota_stats() -> Dict:
                 "first_request": row['first_request'],
                 "last_request": row['last_request']
             }
-            for row in cursor.fetchall()
+            for row in fetchall_as_dicts(cursor)
         ]
         
         # Get today's hits per provider (for daily quota tracking)
@@ -1147,7 +1173,7 @@ def get_ai_quota_stats() -> Dict:
                 "today_requests": row['today_requests'],
                 "today_successful": row['today_successful']
             }
-            for row in cursor.fetchall()
+            for row in fetchall_as_dicts(cursor)
         }
         
         # Get this hour's hits (for rate limiting awareness)
@@ -1162,7 +1188,7 @@ def get_ai_quota_stats() -> Dict:
         
         hour_stats = {
             row['ai_provider']: row['hour_requests']
-            for row in cursor.fetchall()
+            for row in fetchall_as_dicts(cursor)
         }
         
         # Get total across all providers
@@ -1173,7 +1199,7 @@ def get_ai_quota_stats() -> Dict:
             FROM ai_processing_logs
         """, (today,))
         
-        totals = cursor.fetchone()
+        totals = fetchone_as_dict(cursor)
         
         # Known quota limits
         quota_limits = {
@@ -1236,7 +1262,7 @@ def get_app_wide_stats(start_date: Optional[str] = None, end_date: Optional[str]
             WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)
         """, (start_date, end_date))
         
-        scrape_totals = cursor.fetchone()
+        scrape_totals = fetchone_as_dict(cursor)
         
         # Scrape source breakdown (device vs AI fallback vs playwright)
         cursor.execute("""
@@ -1258,7 +1284,7 @@ def get_app_wide_stats(start_date: Optional[str] = None, end_date: Optional[str]
                 "success_rate": round((row['successful'] / row['count'] * 100) if row['count'] > 0 else 0, 1),
                 "avg_products": round(row['avg_products'] or 0, 1)
             }
-            for row in cursor.fetchall()
+            for row in fetchall_as_dicts(cursor)
         ]
         
         # Platform failure rates
@@ -1289,7 +1315,7 @@ def get_app_wide_stats(start_date: Optional[str] = None, end_date: Optional[str]
                 "relevance_rate": round((row['relevant'] / row['products'] * 100) if row['products'] > 0 else 0, 1),
                 "avg_latency_ms": round(row['avg_latency'] or 0, 0)
             }
-            for row in cursor.fetchall()
+            for row in fetchall_as_dicts(cursor)
         ]
         
         # AI processing stats (extraction accuracy)
@@ -1304,7 +1330,7 @@ def get_app_wide_stats(start_date: Optional[str] = None, end_date: Optional[str]
             WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)
         """, (start_date, end_date))
         
-        ai_totals = cursor.fetchone()
+        ai_totals = fetchone_as_dict(cursor)
         
         # AI provider breakdown
         cursor.execute("""
@@ -1329,7 +1355,7 @@ def get_app_wide_stats(start_date: Optional[str] = None, end_date: Optional[str]
                 "fallback_calls": row['fallback_calls'],
                 "avg_latency_ms": round(row['avg_latency'] or 0, 0)
             }
-            for row in cursor.fetchall()
+            for row in fetchall_as_dicts(cursor)
         ]
         
         # Session stats (best deal success)
@@ -1346,7 +1372,7 @@ def get_app_wide_stats(start_date: Optional[str] = None, end_date: Optional[str]
             WHERE date(started_at) >= date(?) AND date(started_at) <= date(?)
         """, (start_date, end_date))
         
-        session_stats_row = cursor.fetchone()
+        session_stats_row = fetchone_as_dict(cursor)
         completed_count = session_stats_row['completed'] or 0
         with_best_deal_count = session_stats_row['with_best_deal'] or 0
         session_stats = {
@@ -1450,7 +1476,7 @@ def get_recent_sessions(
             """, (start_date, end_date, limit))
         
         sessions = []
-        for row in cursor.fetchall():
+        for row in fetchall_as_dicts(cursor):
             sessions.append({
                 "session_id": row['session_id'],
                 "device_id": row['device_id'],
@@ -1562,7 +1588,7 @@ def update_session(request: UpdateSessionRequest) -> bool:
         if request.metadata:
             # Merge with existing metadata
             cursor.execute("SELECT metadata FROM search_sessions WHERE session_id = ?", (request.session_id,))
-            row = cursor.fetchone()
+            row = fetchone_as_dict(cursor)
             existing = json.loads(row['metadata']) if row and row['metadata'] else {}
             existing.update(request.metadata)
             updates.append("metadata = ?")
@@ -1649,7 +1675,7 @@ def get_session_detail(session_id: str) -> Optional[Dict[str, Any]]:
         
         # Get session
         cursor.execute("SELECT * FROM search_sessions WHERE session_id = ?", (session_id,))
-        session = cursor.fetchone()
+        session = fetchone_as_dict(cursor)
         if not session:
             return None
         
@@ -1659,7 +1685,7 @@ def get_session_detail(session_id: str) -> Optional[Dict[str, Any]]:
             WHERE session_id = ? 
             ORDER BY created_at
         """, (session_id,))
-        platform_events = [dict(row) for row in cursor.fetchall()]
+        platform_events = [dict(row) for row in fetchall_as_dicts(cursor)]
         
         # Get AI events
         cursor.execute("""
@@ -1667,7 +1693,7 @@ def get_session_detail(session_id: str) -> Optional[Dict[str, Any]]:
             WHERE session_id = ? 
             ORDER BY created_at
         """, (session_id,))
-        ai_events = [dict(row) for row in cursor.fetchall()]
+        ai_events = [dict(row) for row in fetchall_as_dicts(cursor)]
         
         # Parse metadata
         session_dict = dict(session)
@@ -1711,7 +1737,7 @@ def get_device_sessions(
             LIMIT ?
         """, (device_id, start_date, end_date, limit))
         
-        return [dict(row) for row in cursor.fetchall()]
+        return [dict(row) for row in fetchall_as_dicts(cursor)]
 
 
 def get_session_pipeline_visualization(session_id: str) -> Dict[str, Any]:
