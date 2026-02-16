@@ -82,15 +82,25 @@ def extract_column_names(sql: str, table_schemas: dict = TABLE_SCHEMAS) -> list:
     # Remove newlines and extra spaces
     sql = ' '.join(sql.split())
     
-    # Handle SELECT * FROM table_name
-    star_match = re.search(r'SELECT\s+\*\s+FROM\s+(\w+)', sql, re.IGNORECASE)
+    # Handle SELECT * FROM table_name by looking up table schema
+    # (libsql doesn't support cursor.description)
+    
+    # 1. Simple Case: SELECT * FROM table
+    star_match = re.search(r'SELECT\s+\*\s+FROM\s+([a-zA-Z0-9_]+)', sql, re.IGNORECASE)
     if star_match:
         table_name = star_match.group(1).lower()
         if table_name in table_schemas:
             return table_schemas[table_name]
-        # Unknown table, can't resolve columns
-        return []
     
+    # 2. Case with WHERE/ORDER: SELECT * FROM table WHERE ...
+    # This regex ensures we capture the table name before any clauses
+    star_complex_match = re.search(r'SELECT\s+\*\s+FROM\s+([a-zA-Z0-9_]+)(?:\s+|$)', sql, re.IGNORECASE)
+    if star_complex_match:
+        table_name = star_complex_match.group(1).lower()
+        if table_name in table_schemas:
+            return table_schemas[table_name]
+
+    # 3. Explicit columns: SELECT col1, col2 ...
     # Find SELECT ... FROM portion
     match = re.search(r'SELECT\s+(.+?)\s+FROM', sql, re.IGNORECASE)
     if not match:
