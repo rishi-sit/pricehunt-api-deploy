@@ -1627,10 +1627,53 @@ async def get_ai_quota():
             "data": quota_stats
         }
     except Exception as e:
+        import traceback
         return {
             "success": False,
-            "error": str(e)
+            "error": str(e),
+            "traceback": traceback.format_exc()
         }
+
+
+@app.get("/api/analytics/debug-db")
+async def debug_db():
+    """Debug endpoint to check DB row format."""
+    from app.analytics import get_db, get_cursor, fetchone_as_dict
+    try:
+        with get_db() as conn:
+            cursor = get_cursor(conn)
+            cursor.execute("SELECT 1 as test_val, 'hello' as test_str")
+            desc_before = cursor.description
+            row = cursor.fetchone()
+            desc_after = cursor.description
+            
+            row_info = {
+                "row_type": str(type(row)),
+                "row_repr": repr(row)[:500],
+                "desc_before": [str(d) for d in desc_before] if desc_before else None,
+                "desc_after": [str(d) for d in desc_after] if desc_after else None,
+                "row_dir": [a for a in dir(row) if not a.startswith('_')][:20] if row else [],
+            }
+            
+            # Try index access
+            try:
+                row_info["index_0"] = str(row[0])
+                row_info["index_1"] = str(row[1])
+            except Exception as e:
+                row_info["index_error"] = str(e)
+            
+            # Test helper
+            cursor.execute("SELECT 'world' as greet")
+            try:
+                helper_result = fetchone_as_dict(cursor)
+                row_info["helper_result"] = helper_result
+            except Exception as e:
+                row_info["helper_error"] = str(e)
+            
+            return {"success": True, "deployed": "v5", **row_info}
+    except Exception as e:
+        import traceback
+        return {"success": False, "error": str(e), "tb": traceback.format_exc()}
 
 
 @app.get("/api/analytics/app-wide")
