@@ -38,10 +38,22 @@ else:
     print(f"[Analytics] Using SQLite database: {DB_PATH}")
 
 
+def dict_factory(cursor, row):
+    """Row factory that returns dicts instead of tuples."""
+    if cursor.description:
+        return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
+    return row
+
+
 def get_db_connection():
     """Get database connection (Turso or SQLite)."""
     if USE_TURSO:
         conn = libsql.connect(database=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
+        # Try to set row_factory for dict access (may or may not be supported)
+        try:
+            conn.row_factory = dict_factory
+        except:
+            pass  # libsql may not support row_factory
         return conn
     else:
         conn = sqlite3.connect(DB_PATH)

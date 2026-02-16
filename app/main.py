@@ -722,7 +722,7 @@ async def get_ai_quota_analytics():
 @app.get("/api/analytics/debug-db")
 async def debug_db():
     """Debug endpoint to check DB row format."""
-    from app.analytics import get_db, get_cursor
+    from app.analytics import get_db, get_cursor, fetchall_as_dicts, fetchone_as_dict
     try:
         with get_db() as conn:
             cursor = get_cursor(conn)
@@ -737,13 +737,14 @@ async def debug_db():
                 "has_fields": hasattr(row, '_fields'),
                 "has_asdict": hasattr(row, 'asdict'),
                 "cursor_description": [str(d) for d in cursor.description] if cursor.description else None,
+                "row_dir": [a for a in dir(row) if not a.startswith('_')][:20] if row else None,
             }
             
             # Try to access with index
             try:
                 row_info["index_0"] = str(row[0])
-            except:
-                row_info["index_0"] = "failed"
+            except Exception as e:
+                row_info["index_0_error"] = str(e)
             
             # Try dict-like access
             try:
@@ -751,9 +752,21 @@ async def debug_db():
             except Exception as e:
                 row_info["dict_cnt_error"] = str(e)
             
+            # Try using our helper
+            cursor.execute("SELECT 1 as test_col, 'hello' as test_str")
+            try:
+                helper_row = fetchone_as_dict(cursor)
+                row_info["helper_result"] = helper_row
+            except Exception as e:
+                row_info["helper_error"] = str(e)
+            
+            # Check if conn has row_factory
+            row_info["conn_has_row_factory"] = hasattr(conn, 'row_factory')
+            
             return {"success": True, **row_info}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        import traceback
+        return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
 
 
 @app.get("/api/analytics/combined/{device_id}")
