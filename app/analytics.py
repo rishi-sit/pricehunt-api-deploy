@@ -167,7 +167,9 @@ class SmartCursor:
         self._last_sql = sql
         self._columns = extract_column_names(sql)
         if params:
-            return self._cursor.execute(sql, params)
+            # Turso/libsql requires tuple, not list
+            params_tuple = tuple(params) if isinstance(params, list) else params
+            return self._cursor.execute(sql, params_tuple)
         return self._cursor.execute(sql)
     
     def fetchone(self):
