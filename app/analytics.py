@@ -203,6 +203,10 @@ class SmartCursor:
         return self._cursor.lastrowid
     
     @property
+    def rowcount(self):
+        return self._cursor.rowcount
+    
+    @property
     def description(self):
         return self._cursor.description
 
