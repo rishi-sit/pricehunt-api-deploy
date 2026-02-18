@@ -1002,7 +1002,7 @@ def get_recent_logs(
         query += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
         
-        cursor.execute(query, params)
+        cursor.execute(query, tuple(params))
         
         return [
             ScrapeLogResponse(
@@ -1857,7 +1857,7 @@ def update_session(request: UpdateSessionRequest) -> bool:
         
         values.append(request.session_id)
         query = f"UPDATE search_sessions SET {', '.join(updates)} WHERE session_id = ?"
-        cursor.execute(query, values)
+        cursor.execute(query, tuple(values))  # Convert to tuple for libsql compatibility
         return cursor.rowcount > 0
 
 
