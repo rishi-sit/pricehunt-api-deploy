@@ -844,30 +844,39 @@ def log_scrape_event(log: ScrapeLogRequest) -> int:
 def log_bulk_events(logs: List[ScrapeLogRequest]) -> List[int]:
     """Log multiple scrape events efficiently."""
     ids = []
+    print(f"[Analytics] log_bulk_events: Processing {len(logs)} logs")
     with get_db() as conn:
         cursor = get_cursor(conn)
-        for log in logs:
-            cursor.execute("""
-                INSERT INTO scrape_logs (
-                    device_id, search_query, platform, scrape_source,
-                    html_size_kb, products_scraped, relevant_products,
-                    ai_model, success, error_message, latency_ms, pincode
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                log.device_id,
-                log.search_query,
-                log.platform,
-                log.scrape_source,
-                log.html_size_kb,
-                log.products_scraped,
-                log.relevant_products,
-                log.ai_model,
-                log.success,
-                log.error_message,
-                log.latency_ms,
-                log.pincode
-            ))
-            ids.append(cursor.lastrowid)
+        for i, log in enumerate(logs):
+            try:
+                cursor.execute("""
+                    INSERT INTO scrape_logs (
+                        device_id, search_query, platform, scrape_source,
+                        html_size_kb, products_scraped, relevant_products,
+                        ai_model, success, error_message, latency_ms, pincode
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    log.device_id,
+                    log.search_query,
+                    log.platform,
+                    log.scrape_source,
+                    log.html_size_kb,
+                    log.products_scraped,
+                    log.relevant_products,
+                    log.ai_model,
+                    log.success,
+                    log.error_message,
+                    log.latency_ms,
+                    log.pincode
+                ))
+                row_id = cursor.lastrowid
+                ids.append(row_id)
+                print(f"[Analytics] Inserted log {i+1}/{len(logs)}: ID={row_id}, Platform={log.platform}, Device={log.device_id}")
+            except Exception as e:
+                print(f"[Analytics] ERROR inserting log {i+1}/{len(logs)}: {str(e)}")
+                raise
+        print(f"[Analytics] All {len(ids)} logs inserted, awaiting commit")
+    print(f"[Analytics] Database committed successfully")
     return ids
 
 

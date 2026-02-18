@@ -533,7 +533,9 @@ async def log_analytics_bulk(request: BulkLogRequest):
     Use this to send all platform results at once after a search completes.
     """
     try:
+        print(f"[Analytics] Received {len(request.logs)} logs for bulk insertion")
         log_ids = log_bulk_events(request.logs)
+        print(f"[Analytics] Successfully inserted {len(log_ids)} logs: {log_ids}")
         return {
             "success": True,
             "log_ids": log_ids,
@@ -541,6 +543,9 @@ async def log_analytics_bulk(request: BulkLogRequest):
             "message": f"Logged {len(log_ids)} analytics events"
         }
     except Exception as e:
+        print(f"[Analytics] ERROR during log_bulk_events: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {
             "success": False,
             "error": str(e)
