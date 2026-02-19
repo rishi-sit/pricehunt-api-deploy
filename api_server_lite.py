@@ -1927,15 +1927,29 @@ async def debug_db():
             cursor.execute("SELECT COUNT(*) as cnt FROM search_sessions")
             sessions_count = fetchone_as_dict(cursor).get('cnt', 0)
             
+            # Check scrape_logs count and recent entries
+            cursor.execute("SELECT COUNT(*) as cnt FROM scrape_logs")
+            scrape_logs_count = fetchone_as_dict(cursor).get('cnt', 0)
+            
+            cursor.execute("""
+                SELECT id, device_id, platform, scrape_source, products_scraped, created_at
+                FROM scrape_logs 
+                ORDER BY created_at DESC 
+                LIMIT 5
+            """)
+            recent_scrape_logs = fetchall_as_dicts(cursor)
+            
             return {
                 "success": True, 
-                "deployed": "v9-ai-events-debug",
+                "deployed": "v10-scrape-logs-debug",
                 "counts": {
                     "sessions": sessions_count,
                     "platform_events": platform_events_count,
-                    "ai_events": ai_events_count
+                    "ai_events": ai_events_count,
+                    "scrape_logs": scrape_logs_count
                 },
-                "recent_ai_events": recent_ai_events
+                "recent_ai_events": recent_ai_events,
+                "recent_scrape_logs": recent_scrape_logs
             }
     except Exception as e:
         import traceback
