@@ -57,6 +57,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Global exception handler to capture all unhandled errors
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+import traceback
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    error_detail = f"{type(exc).__name__}: {str(exc)}"
+    print(f"[GLOBAL ERROR] {request.url.path}: {error_detail}")
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"error": error_detail, "type": type(exc).__name__, "path": str(request.url.path), "traceback": traceback.format_exc()[:2000]}
+    )
+
 # Initialize AI services
 smart_search = get_smart_search()
 product_matcher = get_product_matcher()
@@ -874,9 +889,15 @@ async def smart_search_endpoint(request: SmartSearchRequest):
         }
     except Exception as e:
         import traceback
-        print(f"[smart-search] ERROR: {e}")
+        error_detail = f"{type(e).__name__}: {str(e)}"
+        print(f"[smart-search] ERROR: {error_detail}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+        # Return JSON error response directly to ensure error details are visible
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=500,
+            content={"error": error_detail, "type": type(e).__name__, "traceback": traceback.format_exc()[:2000]}
+        )
 
 
 @app.post("/api/match-products")
