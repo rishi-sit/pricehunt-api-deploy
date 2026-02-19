@@ -2190,16 +2190,24 @@ def get_session_pipeline_visualization(session_id: str) -> Dict[str, Any]:
     
     # Process platform events
     for event in detail.get('platform_events', []):
+        # Handle both platform_scrape_events and scrape_logs field names
+        source = event.get('source') or event.get('scrape_source') or 'device'
+        html_size = event.get('html_size_bytes', 0)
+        if isinstance(html_size, (int, float)) and html_size > 1024:
+            html_size_kb = html_size / 1024  # Convert bytes to KB
+        else:
+            html_size_kb = event.get('html_size_kb', 0)
+        
         pipeline['stage_1_scraping']['platforms'].append({
-            "platform": event['platform'],
-            "source": event['scrape_source'],
+            "platform": event.get('platform', 'Unknown'),
+            "source": source,
             "tier": event.get('scrape_tier', 1),
-            "html_size_kb": event.get('html_size_kb', 0),
+            "html_size_kb": round(html_size_kb, 2),
             "products_found": event.get('products_found', 0),
             "relevant_products": event.get('relevant_products', 0),
             "latency_ms": event.get('latency_ms', 0),
-            "success": event.get('success', False),
-            "error": event.get('error_message'),
+            "success": event.get('success', True),  
+            "error": event.get('error') or event.get('error_message'),
             "retry_count": event.get('retry_count', 0)
         })
     
