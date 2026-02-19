@@ -218,16 +218,32 @@ def dict_factory(cursor, row):
     return row
 
 
-def get_db_connection():
-    """Get database connection (Turso or SQLite)."""
+def get_db_connection(max_retries: int = 3, initial_delay: float = 1.0):
+    """Get database connection (Turso or SQLite) with retry logic for transient errors."""
+    import time
+    
     if USE_TURSO:
-        conn = libsql.connect(database=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
-        # Try to set row_factory for dict access (may or may not be supported)
-        try:
-            conn.row_factory = dict_factory
-        except:
-            pass  # libsql may not support row_factory
-        return conn
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                conn = libsql.connect(database=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
+                # Try to set row_factory for dict access (may or may not be supported)
+                try:
+                    conn.row_factory = dict_factory
+                except:
+                    pass  # libsql may not support row_factory
+                return conn
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+                if attempt < max_retries - 1 and ("stream" in error_str or "hrana" in error_str or "404" in error_str or "connection" in error_str):
+                    delay = initial_delay * (2 ** attempt)
+                    print(f"[Analytics] Turso connection error (attempt {attempt + 1}/{max_retries}): {e}")
+                    print(f"[Analytics] Retrying in {delay}s...")
+                    time.sleep(delay)
+                else:
+                    raise
+        raise last_error
     else:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -331,42 +347,48 @@ def _get_id_column():
     return "id INTEGER PRIMARY KEY AUTOINCREMENT"
 
 
-def init_database(max_retries: int = 3, initial_delay: float = 1.0):
+def init_database(max_retries: int = 5, initial_delay: float = 2.0):
     """
     Initialize the analytics database with required tables.
     Includes retry logic for transient Turso connection errors.
+    
+    Uses 5 retries with exponential backoff (2s, 4s, 8s, 16s, 32s).
     """
     import time
+    
+    print(f"[Analytics] Initializing database (max_retries={max_retries}, initial_delay={initial_delay}s)...")
     
     last_error = None
     for attempt in range(max_retries):
         try:
             _init_database_internal()
-            if attempt > 0:
-                print(f"[Analytics] Database initialized successfully after {attempt + 1} attempts")
+            print(f"[Analytics] Database initialized successfully" + 
+                  (f" after {attempt + 1} attempts" if attempt > 0 else ""))
             return
         except ValueError as e:
             # Turso "stream not found" or similar transient errors
             last_error = e
             error_str = str(e).lower()
-            if "stream not found" in error_str or "no runtime" in error_str or "hrana" in error_str:
+            if "stream not found" in error_str or "no runtime" in error_str or "hrana" in error_str or "404" in error_str:
                 delay = initial_delay * (2 ** attempt)  # Exponential backoff
                 print(f"[Analytics] Transient Turso error (attempt {attempt + 1}/{max_retries}): {e}")
                 print(f"[Analytics] Retrying in {delay}s...")
                 time.sleep(delay)
             else:
                 # Not a transient error, re-raise immediately
+                print(f"[Analytics] Non-transient error, not retrying: {e}")
                 raise
         except Exception as e:
             # Other errors - retry as well since Turso can be flaky
             last_error = e
             delay = initial_delay * (2 ** attempt)
-            print(f"[Analytics] Database init error (attempt {attempt + 1}/{max_retries}): {e}")
+            print(f"[Analytics] Database init error (attempt {attempt + 1}/{max_retries}): {type(e).__name__}: {e}")
             print(f"[Analytics] Retrying in {delay}s...")
             time.sleep(delay)
     
-    # All retries exhausted
-    print(f"[Analytics] WARNING: Database initialization failed after {max_retries} attempts: {last_error}")
+    # All retries exhausted - DON'T crash, just warn
+    print(f"[Analytics] WARNING: Database initialization failed after {max_retries} attempts")
+    print(f"[Analytics] Last error: {type(last_error).__name__}: {last_error}")
     print(f"[Analytics] The service will continue but analytics may not be persisted.")
 
 
