@@ -813,10 +813,12 @@ async def smart_search_endpoint(request: SmartSearchRequest):
         } if platform_results else {}
 
         # Log AI filtering event (Stage 3: AI Filtering)
+        ai_log_result = None
+        ai_log_error = None
         if request.session_id or request.device_id:
             try:
                 ai_meta = result.ai_meta or {}
-                log_ai_processing_event(AIProcessingEventRequest(
+                ai_log_result = log_ai_processing_event(AIProcessingEventRequest(
                     session_id=request.session_id,
                     device_id=request.device_id,
                     endpoint="smart-search",
@@ -832,6 +834,7 @@ async def smart_search_endpoint(request: SmartSearchRequest):
                     metadata={"query_understanding": result.query_understanding, "platform_counts": platform_counts}
                 ))
             except Exception as log_err:
+                ai_log_error = str(log_err)
                 print(f"⚠️ Failed to log smart-search AI event: {log_err}")
 
         return {
@@ -852,6 +855,13 @@ async def smart_search_endpoint(request: SmartSearchRequest):
                 "total_relevant": result.total_found,
                 "total_filtered": result.total_filtered,
                 "platform_counts": platform_counts
+            },
+            "_debug_ai_log": {
+                "attempted": request.session_id is not None or request.device_id is not None,
+                "session_id": request.session_id,
+                "device_id": request.device_id,
+                "result": ai_log_result,
+                "error": ai_log_error
             }
         }
     except Exception as e:
