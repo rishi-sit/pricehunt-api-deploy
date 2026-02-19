@@ -1942,6 +1942,45 @@ async def list_ai_events(limit: int = 20):
         return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
 
 
+@app.get("/api/analytics/test-smart-search-log")
+async def test_smart_search_log():
+    """Test the exact AI event logging used in smart-search endpoint."""
+    from app.analytics import log_ai_processing_event, AIProcessingEventRequest
+    import traceback
+    
+    try:
+        # Mimic exactly what smart-search does
+        test_request = AIProcessingEventRequest(
+            session_id="smart-search-test-session",
+            device_id="smart-search-test-device",
+            endpoint="smart-search",
+            platform=None,  # Same as smart-search
+            ai_provider="gemini",
+            ai_model="gemini-2.5-flash",
+            is_fallback=False,
+            fallback_reason=None,
+            products_input=10,
+            products_output=5,
+            latency_ms=500,
+            success=True,
+            metadata={"query_understanding": {"original": "milk"}, "platform_counts": {"blinkit": 5}}
+        )
+        
+        result = log_ai_processing_event(test_request)
+        
+        return {
+            "success": True,
+            "function_returned": result,
+            "request": test_request.dict()
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
 @app.get("/api/analytics/app-wide")
 async def get_app_wide_analytics(
     start_date: Optional[str] = None,
