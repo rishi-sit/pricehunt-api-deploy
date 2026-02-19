@@ -2230,6 +2230,58 @@ async def get_sessions_for_device(
         return {"success": False, "error": str(e)}
 
 
+@app.get("/api/analytics/ai-events/debug")
+async def debug_ai_events(
+    device_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    limit: int = 20
+):
+    """
+    Debug endpoint: Query AI processing events directly.
+    """
+    from app.analytics import get_db, get_cursor, fetchall_as_dicts
+    
+    try:
+        with get_db() as conn:
+            cursor = get_cursor(conn)
+            
+            if session_id:
+                cursor.execute("""
+                    SELECT * FROM ai_processing_events 
+                    WHERE session_id = ? 
+                    ORDER BY created_at DESC 
+                    LIMIT ?
+                """, (session_id, limit))
+            elif device_id:
+                cursor.execute("""
+                    SELECT * FROM ai_processing_events 
+                    WHERE device_id = ? 
+                    ORDER BY created_at DESC 
+                    LIMIT ?
+                """, (device_id, limit))
+            else:
+                cursor.execute("""
+                    SELECT * FROM ai_processing_events 
+                    ORDER BY created_at DESC 
+                    LIMIT ?
+                """, (limit,))
+            
+            events = fetchall_as_dicts(cursor)
+            
+            return {
+                "success": True,
+                "count": len(events),
+                "events": events
+            }
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
 # ============================================================================
 # Analytics Dashboard UI
 # ============================================================================
