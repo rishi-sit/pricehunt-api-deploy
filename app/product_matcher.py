@@ -127,6 +127,18 @@ class ProductMatcher:
         if use_ai and self.gemini.is_available() and len(products) > 3:
             ai_result = await self.gemini.match_products_across_platforms(products)
             print(f"🔍 ProductMatcher: gemini returned ai_powered={ai_result.get('ai_powered')}, ai_meta={ai_result.get('ai_meta')}")
+        else:
+            # Set default ai_meta when Gemini is skipped
+            reason = "gemini_unavailable" if not self.gemini.is_available() else ("too_few_products" if len(products) <= 3 else "ai_disabled")
+            ai_result = {
+                "ai_powered": False,
+                "ai_meta": {
+                    "provider": "rule_based",
+                    "model": "rule_based",
+                    "reason": reason
+                }
+            }
+            print(f"🔍 ProductMatcher: using rule-based matching, reason={reason}")
 
         ai_result = self._normalize_ai_result(ai_result)
         

@@ -690,6 +690,7 @@ class GeminiService:
                 "unmatched_products": products,
                 "ai_powered": False,
                 "ai_meta": {
+                    "provider": "gemini",
                     "ai_available": False,
                     "model": self.model_name
                 }
