@@ -1892,6 +1892,41 @@ async def debug_db():
         return {"success": False, "error": str(e), "tb": traceback.format_exc()}
 
 
+@app.get("/api/analytics/test-ai-event-log")
+async def test_ai_event_log():
+    """Test endpoint to directly test log_ai_processing_event function."""
+    from app.analytics import log_ai_processing_event, AIProcessingEventRequest
+    
+    try:
+        test_request = AIProcessingEventRequest(
+            session_id="test_direct_" + str(int(time.time())),
+            device_id="test_device_direct",
+            endpoint="test-endpoint",
+            platform="test-platform",
+            ai_provider="test-provider",
+            ai_model="test-model",
+            products_input=10,
+            products_output=5,
+            latency_ms=100,
+            success=True
+        )
+        
+        result = log_ai_processing_event(test_request)
+        
+        return {
+            "success": True,
+            "function_returned": result,
+            "request": test_request.dict()
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
 @app.get("/api/analytics/app-wide")
 async def get_app_wide_analytics(
     start_date: Optional[str] = None,
