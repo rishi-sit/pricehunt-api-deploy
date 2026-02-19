@@ -712,6 +712,7 @@ class GeminiService:
             result = self._parse_json_text(text)
             result["ai_powered"] = True
             result["ai_meta"] = {
+                "provider": "gemini",
                 "model": self.model_name,
                 "latency_ms": elapsed_ms,
                 "token_usage": usage,
@@ -744,6 +745,7 @@ class GeminiService:
                 "ai_powered": False,
                 "error": "AI timeout",
                 "ai_meta": {
+                    "provider": "gemini",
                     "model": self.model_name,
                     "latency_ms": elapsed_ms,
                     "timeout": True
@@ -758,6 +760,7 @@ class GeminiService:
                 "ai_powered": False,
                 "error": str(e),
                 "ai_meta": {
+                    "provider": "gemini",
                     "model": self.model_name,
                     "latency_ms": elapsed_ms,
                     "timeout": False,

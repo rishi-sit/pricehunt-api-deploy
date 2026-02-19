@@ -1051,13 +1051,25 @@ async def smart_search_and_match(request: SmartSearchRequest):
         if request.session_id or request.device_id:
             try:
                 match_ai_meta = match_result.ai_meta or {}
+                # Infer provider from model name if not set
+                match_provider = match_ai_meta.get("provider")
+                match_model = match_ai_meta.get("model", "unknown")
+                if not match_provider and match_model:
+                    if "gemini" in match_model.lower():
+                        match_provider = "gemini"
+                    elif "mistral" in match_model.lower():
+                        match_provider = "mistral"
+                    elif "groq" in match_model.lower() or "llama" in match_model.lower():
+                        match_provider = "groq"
+                    else:
+                        match_provider = "unknown"
                 log_ai_processing_event(AIProcessingEventRequest(
                     session_id=None,
                     device_id=request.device_id,
                     endpoint="smart-search-and-match-match",
                     platform=None,
-                    ai_provider=match_ai_meta.get("provider", "unknown"),
-                    ai_model=match_ai_meta.get("model", "unknown"),
+                    ai_provider=match_provider or "unknown",
+                    ai_model=match_model,
                     is_fallback=match_ai_meta.get("fallback_reason") is not None,
                     fallback_reason=match_ai_meta.get("fallback_reason"),
                     products_input=len(filtered_products),
@@ -1941,7 +1953,7 @@ async def debug_db():
             
             return {
                 "success": True, 
-                "deployed": "v12-stage4-fix",
+                "deployed": "v13-stage4-provider-fix",
                 "counts": {
                     "sessions": sessions_count,
                     "platform_events": platform_events_count,
