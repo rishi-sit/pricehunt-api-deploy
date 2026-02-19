@@ -41,12 +41,19 @@ from app.scrapers import (
 )
 
 MAX_PLATFORM_ITEMS = 10
+API_VERSION = "v14-provider-fix"
 
 app = FastAPI(
     title="PriceHunt API Lite",
     description="AI-powered product filtering and matching API (no scraping)",
     version="2.0.0-lite"
 )
+
+
+@app.get("/api/version")
+async def get_version():
+    """Return API version for deployment verification"""
+    return {"version": API_VERSION, "status": "ok"}
 
 # CORS
 app.add_middleware(
@@ -1006,6 +1013,9 @@ async def smart_search_and_match(request: SmartSearchRequest):
         match_result = await product_matcher.match_products(filtered_products)
         match_ms = int((time.monotonic() - match_start) * 1000)
         total_ms = int((time.monotonic() - start_time) * 1000)
+        
+        # Debug: Log ai_meta from match result
+        print(f"🔍 Match result ai_meta: {match_result.ai_meta}")
 
         groups = []
         for group in match_result.product_groups:
