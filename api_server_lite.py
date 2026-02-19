@@ -41,7 +41,7 @@ from app.scrapers import (
 )
 
 MAX_PLATFORM_ITEMS = 10
-API_VERSION = "v15-provider-fix"
+API_VERSION = "v16-exception-handling"
 
 app = FastAPI(
     title="PriceHunt API Lite",
@@ -1061,18 +1061,23 @@ async def smart_search_and_match(request: SmartSearchRequest):
         if request.session_id or request.device_id:
             try:
                 match_ai_meta = match_result.ai_meta or {}
+                print(f"🔍 Stage 4 logging - match_result.ai_meta: {match_ai_meta}")
                 # Infer provider from model name if not set
                 match_provider = match_ai_meta.get("provider")
-                match_model = match_ai_meta.get("model", "unknown")
-                if not match_provider and match_model:
-                    if "gemini" in match_model.lower():
+                match_model = match_ai_meta.get("model")
+                # If provider is missing, try to infer from model
+                if not match_provider:
+                    if match_model and "gemini" in str(match_model).lower():
                         match_provider = "gemini"
-                    elif "mistral" in match_model.lower():
+                    elif match_model and "mistral" in str(match_model).lower():
                         match_provider = "mistral"
-                    elif "groq" in match_model.lower() or "llama" in match_model.lower():
+                    elif match_model and ("groq" in str(match_model).lower() or "llama" in str(match_model).lower()):
                         match_provider = "groq"
                     else:
-                        match_provider = "unknown"
+                        # Default to gemini since that's what matcher uses
+                        match_provider = match_ai_meta.get("provider") or "gemini"
+                if not match_model:
+                    match_model = match_ai_meta.get("model") or "gemini-2.5-flash"
                 log_ai_processing_event(AIProcessingEventRequest(
                     session_id=None,
                     device_id=request.device_id,

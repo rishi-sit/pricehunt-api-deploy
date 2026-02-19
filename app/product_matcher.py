@@ -125,8 +125,21 @@ class ProductMatcher:
         ai_result = None
         print(f"🔍 ProductMatcher: use_ai={use_ai}, gemini_available={self.gemini.is_available()}, products={len(products)}")
         if use_ai and self.gemini.is_available() and len(products) > 3:
-            ai_result = await self.gemini.match_products_across_platforms(products)
-            print(f"🔍 ProductMatcher: gemini returned ai_powered={ai_result.get('ai_powered')}, ai_meta={ai_result.get('ai_meta')}")
+            try:
+                ai_result = await self.gemini.match_products_across_platforms(products)
+                print(f"🔍 ProductMatcher: gemini returned ai_powered={ai_result.get('ai_powered')}, ai_meta={ai_result.get('ai_meta')}")
+            except Exception as e:
+                print(f"🔍 ProductMatcher: gemini call failed with exception: {e}")
+                ai_result = {
+                    "ai_powered": False,
+                    "ai_meta": {
+                        "provider": "gemini",
+                        "model": self.gemini.model_name,
+                        "error": str(e)
+                    },
+                    "product_groups": [],
+                    "unmatched_products": products
+                }
         else:
             # Set default ai_meta when Gemini is skipped
             reason = "gemini_unavailable" if not self.gemini.is_available() else ("too_few_products" if len(products) <= 3 else "ai_disabled")
