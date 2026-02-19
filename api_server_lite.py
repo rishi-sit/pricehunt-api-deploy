@@ -1850,40 +1850,43 @@ async def get_ai_quota():
 
 @app.get("/api/analytics/debug-db")
 async def debug_db():
-    """Debug endpoint to check DB row format."""
-    from app.analytics import get_db, get_cursor, fetchone_as_dict
+    """Debug endpoint to check DB row format and AI events."""
+    from app.analytics import get_db, get_cursor, fetchone_as_dict, fetchall_as_dicts
     try:
         with get_db() as conn:
             cursor = get_cursor(conn)
-            cursor.execute("SELECT 1 as test_val, 'hello' as test_str")
-            desc_before = cursor.description
-            row = cursor.fetchone()
-            desc_after = cursor.description
             
-            row_info = {
-                "row_type": str(type(row)),
-                "row_repr": repr(row)[:500],
-                "desc_before": [str(d) for d in desc_before] if desc_before else None,
-                "desc_after": [str(d) for d in desc_after] if desc_after else None,
-                "row_dir": [a for a in dir(row) if not a.startswith('_')][:20] if row else [],
+            # Check ai_processing_events count and recent events
+            cursor.execute("SELECT COUNT(*) as cnt FROM ai_processing_events")
+            ai_events_count = fetchone_as_dict(cursor).get('cnt', 0)
+            
+            cursor.execute("""
+                SELECT session_id, device_id, endpoint, ai_provider, ai_model, 
+                       products_input, products_output, latency_ms, success, created_at
+                FROM ai_processing_events 
+                ORDER BY created_at DESC 
+                LIMIT 5
+            """)
+            recent_ai_events = fetchall_as_dicts(cursor)
+            
+            # Check platform_scrape_events count
+            cursor.execute("SELECT COUNT(*) as cnt FROM platform_scrape_events")
+            platform_events_count = fetchone_as_dict(cursor).get('cnt', 0)
+            
+            # Check sessions count
+            cursor.execute("SELECT COUNT(*) as cnt FROM search_sessions")
+            sessions_count = fetchone_as_dict(cursor).get('cnt', 0)
+            
+            return {
+                "success": True, 
+                "deployed": "v9-ai-events-debug",
+                "counts": {
+                    "sessions": sessions_count,
+                    "platform_events": platform_events_count,
+                    "ai_events": ai_events_count
+                },
+                "recent_ai_events": recent_ai_events
             }
-            
-            # Try index access
-            try:
-                row_info["index_0"] = str(row[0])
-                row_info["index_1"] = str(row[1])
-            except Exception as e:
-                row_info["index_error"] = str(e)
-            
-            # Test helper
-            cursor.execute("SELECT 'world' as greet")
-            try:
-                helper_result = fetchone_as_dict(cursor)
-                row_info["helper_result"] = helper_result
-            except Exception as e:
-                row_info["helper_error"] = str(e)
-            
-            return {"success": True, "deployed": "v8-sql-parsing-fix", **row_info}
     except Exception as e:
         import traceback
         return {"success": False, "error": str(e), "tb": traceback.format_exc()}
