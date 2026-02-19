@@ -152,12 +152,13 @@ class FlipkartScraper(BaseScraper):
         return ""
     
     def _extract_url(self, container) -> str:
-        link = container if container.name == 'a' else container.select_one('a[href*="/p/"], a[href*="/product/"]')
+        link = container if container.name == 'a' else container.select_one('a[href*="/p/"], a[href*="/product/"], a[href]')
         if link:
             href = link.get('href', '')
-            if href:
+            if href and ('/p/' in href or '/product/' in href):
                 return f"{self.BASE_URL}{href}" if href.startswith('/') else href
-        return f"{self.BASE_URL}/search"
+        # Don't return search URL - return empty string so this product is skipped
+        return ""
     
     def _extract_rating(self, container) -> Optional[float]:
         for selector in ['._3LWZlK', '.XQDdHH', '[class*="rating"]']:

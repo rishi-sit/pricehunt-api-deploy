@@ -168,62 +168,13 @@ class ZeptoScraper(BaseScraper):
         return results
     
     def _parse_products(self, body_text: str, query: str) -> List[ProductResult]:
-        """Parse products from page text (fallback when URLs not found)."""
-        results = []
-        
-        parts = body_text.split('\nADD\n')
-        
-        for part in parts:
-            if not part.strip():
-                continue
-            
-            lines = [l.strip() for l in part.split('\n') if l.strip()]
-            if len(lines) < 2:
-                continue
-            
-            price = None
-            name = None
-            quantity = None
-            rating = None
-            
-            for line in lines:
-                price_match = re.match(r'^₹(\d+)$', line)
-                if price_match and not price:
-                    price = float(price_match.group(1))
-                    continue
-                
-                if re.match(r'^[0-4]\.[0-9]$', line):
-                    rating = float(line)
-                    continue
-                
-                if re.match(r'^\([\d.]+k?\)$', line):
-                    continue
-                
-                if 'OFF' in line:
-                    continue
-                
-                if re.match(r'^\d+\s*(pack|ml|g|kg|L|pc|pcs)', line, re.I):
-                    quantity = line
-                    continue
-                
-                if not name and len(line) > 5 and not line.startswith('₹'):
-                    name = line
-            
-            if name and price and price > 0:
-                full_name = f"{name} ({quantity})" if quantity else name
-                
-                result = ProductResult(
-                    name=full_name[:120],
-                    price=price,
-                    original_price=None,
-                    discount=None,
-                    platform=self.PLATFORM_NAME,
-                    url=f"{self.BASE_URL}/search?query={query}",
-                    image_url=None,
-                    rating=rating,
-                    available=True,
-                    delivery_time="10-15 mins"
-                )
-                results.append(result)
-        
-        return results
+        """Parse products from page text (fallback when URLs not found).
+
+        Note: This is a fallback method that returns empty list since we cannot
+        reliably extract direct product URLs from text. Return empty instead of
+        search URLs to avoid taking users to search results instead of direct products.
+        """
+        # Returning empty list prevents fallback to search URLs
+        # When product URL extraction fails, it's better to show no results
+        # than to take users to a search page
+        return []
