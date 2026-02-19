@@ -2027,7 +2027,11 @@ def get_session_detail(session_id: str) -> Optional[Dict[str, Any]]:
         if not session:
             return None
         
-        # Get platform events
+        device_id = session.get('device_id')
+        started_at = session.get('started_at')
+        completed_at = session.get('completed_at')
+        
+        # Get platform events from platform_scrape_events table
         cursor.execute("""
             SELECT * FROM platform_scrape_events 
             WHERE session_id = ? 
@@ -2035,11 +2039,51 @@ def get_session_detail(session_id: str) -> Optional[Dict[str, Any]]:
         """, (session_id,))
         platform_events = [dict(row) for row in fetchall_as_dicts(cursor)]
         
-        # Get AI events (match by session_id OR device_id for events logged during session time window)
-        device_id = session.get('device_id')
-        started_at = session.get('started_at')
-        completed_at = session.get('completed_at')
+        # Also check scrape_logs table (Android logs here via /api/analytics/log-bulk)
+        # Link by device_id + time window
+        cursor.execute("""
+            SELECT 
+                id, device_id, platform, 
+                scrape_source as source, 
+                html_size_kb as html_size_bytes,
+                products_scraped as products_found, 
+                relevant_products,
+                ai_model,
+                success, error_message as error, 
+                latency_ms, 
+                created_at
+            FROM scrape_logs 
+            WHERE device_id = ? 
+              AND created_at >= ? 
+              AND (created_at <= ? OR ? IS NULL)
+            ORDER BY created_at
+        """, (device_id, started_at, completed_at, completed_at))
+        scrape_logs = [dict(row) for row in fetchall_as_dicts(cursor)]
         
+        # Merge scrape_logs into platform_events (prefer platform_scrape_events if both exist)
+        existing_platforms = {e.get('platform') for e in platform_events}
+        for log in scrape_logs:
+            if log.get('platform') not in existing_platforms:
+                platform_events.append({
+                    'id': log.get('id'),
+                    'session_id': None,  # Not linked via session_id
+                    'device_id': log.get('device_id'),
+                    'platform': log.get('platform'),
+                    'source': log.get('source', 'device'),
+                    'products_found': log.get('products_found', 0),
+                    'relevant_products': log.get('relevant_products', 0),
+                    'latency_ms': log.get('latency_ms', 0),
+                    'success': log.get('success', True),
+                    'error': log.get('error'),
+                    'html_size_bytes': int((log.get('html_size_bytes') or 0) * 1024),  # Convert KB to bytes
+                    'created_at': log.get('created_at'),
+                    'metadata': {'ai_model': log.get('ai_model')} if log.get('ai_model') else {}
+                })
+        
+        # Sort platform_events by created_at
+        platform_events.sort(key=lambda x: x.get('created_at') or '')
+        
+        # Get AI events (match by session_id OR device_id for events logged during session time window)
         cursor.execute("""
             SELECT * FROM ai_processing_events 
             WHERE session_id = ? 
@@ -2052,7 +2096,8 @@ def get_session_detail(session_id: str) -> Optional[Dict[str, Any]]:
         session_dict = dict(session)
         session_dict['metadata'] = json.loads(session_dict.get('metadata') or '{}')
         for event in platform_events:
-            event['metadata'] = json.loads(event.get('metadata') or '{}')
+            if 'metadata' in event and isinstance(event['metadata'], str):
+                event['metadata'] = json.loads(event.get('metadata') or '{}')
         for event in ai_events:
             event['metadata'] = json.loads(event.get('metadata') or '{}')
         
