@@ -1941,7 +1941,7 @@ async def debug_db():
             
             return {
                 "success": True, 
-                "deployed": "v10-scrape-logs-debug",
+                "deployed": "v11-pipeline-fix",
                 "counts": {
                     "sessions": sessions_count,
                     "platform_events": platform_events_count,
