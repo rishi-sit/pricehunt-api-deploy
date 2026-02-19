@@ -1960,12 +1960,17 @@ def get_session_detail(session_id: str) -> Optional[Dict[str, Any]]:
         """, (session_id,))
         platform_events = [dict(row) for row in fetchall_as_dicts(cursor)]
         
-        # Get AI events
+        # Get AI events (match by session_id OR device_id for events logged during session time window)
+        device_id = session.get('device_id')
+        started_at = session.get('started_at')
+        completed_at = session.get('completed_at')
+        
         cursor.execute("""
             SELECT * FROM ai_processing_events 
             WHERE session_id = ? 
+               OR (device_id = ? AND created_at >= ? AND (created_at <= ? OR ? IS NULL))
             ORDER BY created_at
-        """, (session_id,))
+        """, (session_id, device_id, started_at, completed_at, completed_at))
         ai_events = [dict(row) for row in fetchall_as_dicts(cursor)]
         
         # Parse metadata
