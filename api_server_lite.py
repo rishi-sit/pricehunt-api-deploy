@@ -818,6 +818,12 @@ async def smart_search_endpoint(request: SmartSearchRequest):
         if request.session_id or request.device_id:
             try:
                 ai_meta = result.ai_meta or {}
+                # Convert query_understanding to dict if it's a Pydantic model
+                qu = result.query_understanding
+                if hasattr(qu, 'model_dump'):
+                    qu = qu.model_dump()
+                elif hasattr(qu, 'dict'):
+                    qu = qu.dict()
                 ai_log_result = log_ai_processing_event(AIProcessingEventRequest(
                     session_id=request.session_id,
                     device_id=request.device_id,
@@ -831,7 +837,7 @@ async def smart_search_endpoint(request: SmartSearchRequest):
                     products_output=result.total_found,
                     latency_ms=filter_ms,
                     success=result.ai_powered,
-                    metadata={"query_understanding": result.query_understanding, "platform_counts": platform_counts}
+                    metadata={"query_understanding": qu, "platform_counts": platform_counts}
                 ))
             except Exception as log_err:
                 ai_log_error = str(log_err)
@@ -865,7 +871,10 @@ async def smart_search_endpoint(request: SmartSearchRequest):
             }
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        print(f"[smart-search] ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 
 @app.post("/api/match-products")
