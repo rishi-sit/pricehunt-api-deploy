@@ -864,11 +864,11 @@ async def smart_search_endpoint(request: SmartSearchRequest):
             "query": request.query,
             "pincode": request.pincode,
             "ai_powered": result.ai_powered,
-            "ai_meta": result.ai_meta,
-            "query_understanding": result.query_understanding,
-            "results": result.products,
-            "filtered_out": result.filtered_out,
-            "best_deal": result.best_deal,
+            "ai_meta": dict(result.ai_meta) if result.ai_meta else None,
+            "query_understanding": dict(result.query_understanding) if result.query_understanding else {},
+            "results": list(result.products) if result.products else [],
+            "filtered_out": list(result.filtered_out) if result.filtered_out else [],
+            "best_deal": dict(result.best_deal) if result.best_deal else None,
             "timing_ms": {
                 "total": total_ms,
                 "filter": filter_ms
@@ -883,8 +883,8 @@ async def smart_search_endpoint(request: SmartSearchRequest):
                 "attempted": request.session_id is not None or request.device_id is not None,
                 "session_id": request.session_id,
                 "device_id": request.device_id,
-                "result": ai_log_result,
-                "error": ai_log_error
+                "result": int(ai_log_result) if ai_log_result is not None else None,
+                "error": str(ai_log_error) if ai_log_error else None
             }
         }
     except Exception as e:

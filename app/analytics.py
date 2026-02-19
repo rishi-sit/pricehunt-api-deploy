@@ -2003,8 +2003,12 @@ def log_ai_processing_event(request: AIProcessingEventRequest) -> int:
                 metadata_json
             ))
             event_id = cursor.lastrowid
+            # Ensure we return an actual int, not a coroutine
+            if hasattr(event_id, '__await__'):
+                print(f"[Analytics] WARNING: lastrowid is a coroutine, returning 0")
+                return 0
             print(f"[Analytics] AI event logged successfully with id={event_id}")
-            return event_id
+            return int(event_id) if event_id else 0
     except Exception as e:
         print(f"[Analytics] ERROR logging AI event: {e}")
         import traceback
