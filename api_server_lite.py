@@ -813,6 +813,8 @@ async def smart_search_endpoint(request: SmartSearchRequest):
         } if platform_results else {}
 
         # Log AI filtering event (Stage 3: AI Filtering)
+        # Note: Pass session_id=None to avoid FK constraint error (session may not exist yet)
+        # Events are linked via device_id + timestamp window in get_session_detail()
         ai_log_result = None
         ai_log_error = None
         if request.session_id or request.device_id:
@@ -825,7 +827,7 @@ async def smart_search_endpoint(request: SmartSearchRequest):
                 elif hasattr(qu, 'dict'):
                     qu = qu.dict()
                 ai_log_result = log_ai_processing_event(AIProcessingEventRequest(
-                    session_id=request.session_id,
+                    session_id=None,  # Don't use session_id to avoid FK constraint
                     device_id=request.device_id,
                     endpoint="smart-search",
                     platform=None,  # Applies to all platforms
@@ -903,11 +905,12 @@ async def match_products_endpoint(request: MatchProductsRequest):
             })
 
         # Log AI matching event (Stage 4: Product Matching)
+        # Note: Pass session_id=None to avoid FK constraint error
         if request.session_id or request.device_id:
             try:
                 ai_meta = result.ai_meta or {}
                 log_ai_processing_event(AIProcessingEventRequest(
-                    session_id=request.session_id,
+                    session_id=None,
                     device_id=request.device_id,
                     endpoint="match-products",
                     platform=None,  # Applies to all platforms
@@ -1000,11 +1003,12 @@ async def smart_search_and_match(request: SmartSearchRequest):
         } if platform_results else {}
 
         # Log AI filtering event (Stage 3: AI Filtering)
+        # Note: Pass session_id=None to avoid FK constraint error
         if request.session_id or request.device_id:
             try:
                 filter_ai_meta = filter_result.ai_meta or {}
                 log_ai_processing_event(AIProcessingEventRequest(
-                    session_id=request.session_id,
+                    session_id=None,
                     device_id=request.device_id,
                     endpoint="smart-search-and-match-filter",
                     platform=None,
@@ -1022,11 +1026,12 @@ async def smart_search_and_match(request: SmartSearchRequest):
                 print(f"⚠️ Failed to log smart-search-and-match filter AI event: {log_err}")
 
         # Log AI matching event (Stage 4: Product Matching)
+        # Note: Pass session_id=None to avoid FK constraint error
         if request.session_id or request.device_id:
             try:
                 match_ai_meta = match_result.ai_meta or {}
                 log_ai_processing_event(AIProcessingEventRequest(
-                    session_id=request.session_id,
+                    session_id=None,
                     device_id=request.device_id,
                     endpoint="smart-search-and-match-match",
                     platform=None,
@@ -1133,6 +1138,7 @@ async def ai_extract_products(request: AIExtractRequest):
         extracted_products = result.get("products", [])
         
         # Log AI extraction event (Stage 2: AI Extraction)
+        # Note: Pass session_id=None to avoid FK constraint error
         if request.session_id or request.device_id:
             try:
                 extraction_ai_meta = {
@@ -1140,7 +1146,7 @@ async def ai_extract_products(request: AIExtractRequest):
                     "model": result.get("model", "unknown"),
                 }
                 log_ai_processing_event(AIProcessingEventRequest(
-                    session_id=request.session_id,
+                    session_id=None,
                     device_id=request.device_id,
                     endpoint="ai-extract",
                     platform=request.platform,
@@ -1185,10 +1191,11 @@ async def ai_extract_products(request: AIExtractRequest):
         filter_ai_meta = filter_result.get("ai_meta", {})
         
         # Log AI filtering event (Stage 3: AI Filtering)
+        # Note: Pass session_id=None to avoid FK constraint error
         if request.session_id or request.device_id:
             try:
                 log_ai_processing_event(AIProcessingEventRequest(
-                    session_id=request.session_id,
+                    session_id=None,
                     device_id=request.device_id,
                     endpoint="ai-filter",
                     platform=request.platform,
@@ -1381,11 +1388,12 @@ async def smart_extract_and_filter(request: MultiPlatformExtractRequest):
             }
         
         # Log AI extraction events for each platform (Stage 2: AI Extraction)
+        # Note: Pass session_id=None to avoid FK constraint error
         if request.session_id or request.device_id:
             for platform, result in extraction_result.get("results", {}).items():
                 try:
                     log_ai_processing_event(AIProcessingEventRequest(
-                        session_id=request.session_id,
+                        session_id=None,
                         device_id=request.device_id,
                         endpoint="smart-extract-extraction",
                         platform=platform,
@@ -1411,11 +1419,12 @@ async def smart_extract_and_filter(request: MultiPlatformExtractRequest):
         filtered_products = filter_result.get("products", all_products)
         
         # Log AI filtering event (Stage 3: AI Filtering)
+        # Note: Pass session_id=None to avoid FK constraint error
         if request.session_id or request.device_id:
             try:
                 filter_ai_meta = filter_result.get("ai_meta") or {}
                 log_ai_processing_event(AIProcessingEventRequest(
-                    session_id=request.session_id,
+                    session_id=None,
                     device_id=request.device_id,
                     endpoint="smart-extract-filter",
                     platform=None,
@@ -1436,11 +1445,12 @@ async def smart_extract_and_filter(request: MultiPlatformExtractRequest):
         match_result = await product_matcher.match_products(filtered_products)
         
         # Log AI matching event (Stage 4: Product Matching)
+        # Note: Pass session_id=None to avoid FK constraint error
         if request.session_id or request.device_id:
             try:
                 match_ai_meta = match_result.ai_meta if hasattr(match_result, 'ai_meta') else {}
                 log_ai_processing_event(AIProcessingEventRequest(
-                    session_id=request.session_id,
+                    session_id=None,
                     device_id=request.device_id,
                     endpoint="smart-extract-match",
                     platform=None,
