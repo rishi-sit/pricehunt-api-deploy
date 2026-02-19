@@ -1927,6 +1927,21 @@ async def test_ai_event_log():
         }
 
 
+@app.get("/api/analytics/ai-events")
+async def list_ai_events(limit: int = 20):
+    """Debug endpoint to list all AI processing events."""
+    from app.analytics import get_db, get_cursor, fetchall_as_dicts
+    try:
+        with get_db() as conn:
+            cursor = get_cursor(conn)
+            cursor.execute(f"SELECT * FROM ai_processing_events ORDER BY created_at DESC LIMIT {limit}")
+            events = fetchall_as_dicts(cursor)
+            return {"success": True, "count": len(events), "events": events}
+    except Exception as e:
+        import traceback
+        return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+
+
 @app.get("/api/analytics/app-wide")
 async def get_app_wide_analytics(
     start_date: Optional[str] = None,

@@ -57,9 +57,10 @@ TABLE_SCHEMAS = {
         'html_size_kb', 'endpoint_used', 'metadata', 'created_at'
     ],
     'ai_processing_events': [
-        'id', 'session_id', 'platform', 'ai_provider', 'ai_model', 'started_at',
-        'completed_at', 'latency_ms', 'input_tokens', 'output_tokens', 'products_extracted',
-        'products_relevant', 'success', 'error_message', 'fallback_from', 'metadata', 'created_at'
+        'id', 'session_id', 'device_id', 'endpoint', 'platform', 'ai_provider', 'ai_model',
+        'is_fallback', 'fallback_reason', 'input_size_kb', 'input_tokens', 'output_tokens',
+        'products_input', 'products_output', 'latency_ms', 'success', 'error_message',
+        'http_status', 'metadata', 'created_at'
     ],
     'scrape_logs': [
         'id', 'device_id', 'query', 'platform', 'scrape_source', 'html_size_kb',
