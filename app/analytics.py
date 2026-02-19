@@ -1947,37 +1947,46 @@ def log_platform_scrape_event(request: PlatformScrapeEventRequest) -> int:
 
 def log_ai_processing_event(request: AIProcessingEventRequest) -> int:
     """Log an AI processing event within a session."""
-    with get_db() as conn:
-        cursor = get_cursor(conn)
-        metadata_json = json.dumps(request.metadata or {})
-        cursor.execute("""
-            INSERT INTO ai_processing_events (
-                session_id, device_id, endpoint, platform, ai_provider, ai_model,
-                is_fallback, fallback_reason, input_size_kb, input_tokens, output_tokens,
-                products_input, products_output, latency_ms, success, error_message,
-                http_status, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            request.session_id,
-            request.device_id,
-            request.endpoint,
-            request.platform,
-            request.ai_provider,
-            request.ai_model,
-            request.is_fallback,
-            request.fallback_reason,
-            request.input_size_kb,
-            request.input_tokens,
-            request.output_tokens,
-            request.products_input,
-            request.products_output,
-            request.latency_ms,
-            request.success,
-            request.error_message,
-            request.http_status,
-            metadata_json
-        ))
-        return cursor.lastrowid
+    print(f"[Analytics] log_ai_processing_event called: session_id={request.session_id}, device_id={request.device_id}, endpoint={request.endpoint}, provider={request.ai_provider}")
+    try:
+        with get_db() as conn:
+            cursor = get_cursor(conn)
+            metadata_json = json.dumps(request.metadata or {})
+            cursor.execute("""
+                INSERT INTO ai_processing_events (
+                    session_id, device_id, endpoint, platform, ai_provider, ai_model,
+                    is_fallback, fallback_reason, input_size_kb, input_tokens, output_tokens,
+                    products_input, products_output, latency_ms, success, error_message,
+                    http_status, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                request.session_id,
+                request.device_id,
+                request.endpoint,
+                request.platform,
+                request.ai_provider,
+                request.ai_model,
+                request.is_fallback,
+                request.fallback_reason,
+                request.input_size_kb,
+                request.input_tokens,
+                request.output_tokens,
+                request.products_input,
+                request.products_output,
+                request.latency_ms,
+                request.success,
+                request.error_message,
+                request.http_status,
+                metadata_json
+            ))
+            event_id = cursor.lastrowid
+            print(f"[Analytics] AI event logged successfully with id={event_id}")
+            return event_id
+    except Exception as e:
+        print(f"[Analytics] ERROR logging AI event: {e}")
+        import traceback
+        traceback.print_exc()
+        return -1
 
 
 def get_session_detail(session_id: str) -> Optional[Dict[str, Any]]:
