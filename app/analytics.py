@@ -2213,7 +2213,7 @@ def get_session_pipeline_visualization(session_id: str) -> Dict[str, Any]:
     
     # Process AI events by endpoint
     for event in detail.get('ai_events', []):
-        endpoint = event.get('endpoint', 'unknown')
+        endpoint = event.get('endpoint', 'unknown').lower()
         ai_call = {
             "platform": event.get('platform'),
             "provider": event['ai_provider'],
@@ -2228,12 +2228,15 @@ def get_session_pipeline_visualization(session_id: str) -> Dict[str, Any]:
             "error": event.get('error_message')
         }
         
-        if 'extract' in endpoint.lower():
+        # Order matters: check more specific patterns first
+        if 'extract' in endpoint:
             pipeline['stage_2_ai_extraction']['calls'].append(ai_call)
-        elif 'filter' in endpoint.lower() or 'smart-search' in endpoint.lower():
-            pipeline['stage_3_filtering']['calls'].append(ai_call)
-        elif 'match' in endpoint.lower():
+        elif endpoint.endswith('-match') or endpoint == 'match-products':
+            # Stage 4: Product matching (e.g., smart-search-and-match-match)
             pipeline['stage_4_matching']['calls'].append(ai_call)
+        elif 'filter' in endpoint or 'smart-search' in endpoint:
+            # Stage 3: Filtering (e.g., smart-search, smart-search-and-match-filter)
+            pipeline['stage_3_filtering']['calls'].append(ai_call)
     
     return pipeline
 
