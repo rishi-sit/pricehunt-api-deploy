@@ -2157,7 +2157,7 @@ async def log_ai_accuracy_endpoint(log: AIAccuracyLogRequest):
 
 
 @app.post("/api/analytics/ai-processing")
-async def log_ai_processing_event(log: AIProcessingLogRequest):
+async def log_ai_processing_endpoint(log: AIProcessingLogRequest):
     """
     Log AI processing event from backend.
     
