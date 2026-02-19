@@ -41,7 +41,7 @@ from app.scrapers import (
 )
 
 MAX_PLATFORM_ITEMS = 10
-API_VERSION = "v14-provider-fix"
+API_VERSION = "v15-provider-fix"
 
 app = FastAPI(
     title="PriceHunt API Lite",
