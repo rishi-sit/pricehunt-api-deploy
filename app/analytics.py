@@ -331,8 +331,47 @@ def _get_id_column():
     return "id INTEGER PRIMARY KEY AUTOINCREMENT"
 
 
-def init_database():
-    """Initialize the analytics database with required tables."""
+def init_database(max_retries: int = 3, initial_delay: float = 1.0):
+    """
+    Initialize the analytics database with required tables.
+    Includes retry logic for transient Turso connection errors.
+    """
+    import time
+    
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            _init_database_internal()
+            if attempt > 0:
+                print(f"[Analytics] Database initialized successfully after {attempt + 1} attempts")
+            return
+        except ValueError as e:
+            # Turso "stream not found" or similar transient errors
+            last_error = e
+            error_str = str(e).lower()
+            if "stream not found" in error_str or "no runtime" in error_str or "hrana" in error_str:
+                delay = initial_delay * (2 ** attempt)  # Exponential backoff
+                print(f"[Analytics] Transient Turso error (attempt {attempt + 1}/{max_retries}): {e}")
+                print(f"[Analytics] Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                # Not a transient error, re-raise immediately
+                raise
+        except Exception as e:
+            # Other errors - retry as well since Turso can be flaky
+            last_error = e
+            delay = initial_delay * (2 ** attempt)
+            print(f"[Analytics] Database init error (attempt {attempt + 1}/{max_retries}): {e}")
+            print(f"[Analytics] Retrying in {delay}s...")
+            time.sleep(delay)
+    
+    # All retries exhausted
+    print(f"[Analytics] WARNING: Database initialization failed after {max_retries} attempts: {last_error}")
+    print(f"[Analytics] The service will continue but analytics may not be persisted.")
+
+
+def _init_database_internal():
+    """Internal database initialization (called by init_database with retry)."""
     with get_db() as conn:
         cursor = get_cursor(conn)
         
