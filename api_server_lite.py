@@ -24,6 +24,9 @@ from app.smart_search import get_smart_search
 from app.product_matcher import get_product_matcher
 from app.ai_service import get_ai_service as get_gemini_service
 from app.ai_scraper import get_ai_scraper
+from app.analytics import (
+    AIProcessingEventRequest, log_ai_processing_event
+)
 from app.scrapers import (
     AmazonScraper,
     AmazonFreshScraper,
@@ -82,10 +85,14 @@ class SmartSearchRequest(BaseModel):
     pincode: Optional[str] = "560001"
     strict_mode: bool = True
     platform_results: Optional[Dict[str, List[ProductInput]]] = None
+    session_id: Optional[str] = None  # For analytics tracking
+    device_id: Optional[str] = None  # For analytics tracking
 
 
 class MatchProductsRequest(BaseModel):
     products: List[ProductInput]
+    session_id: Optional[str] = None  # For analytics tracking
+    device_id: Optional[str] = None  # For analytics tracking
 
 
 class AIExtractRequest(BaseModel):
@@ -95,6 +102,7 @@ class AIExtractRequest(BaseModel):
     search_query: str
     base_url: str
     device_id: Optional[str] = None  # For analytics tracking
+    session_id: Optional[str] = None  # For session-based analytics
 
 
 class MultiPlatformExtractRequest(BaseModel):
@@ -102,6 +110,7 @@ class MultiPlatformExtractRequest(BaseModel):
     platforms: List[Dict[str, str]]  # [{"platform": str, "html": str, "base_url": str}]
     search_query: str
     device_id: Optional[str] = None  # For analytics tracking
+    session_id: Optional[str] = None  # For session-based analytics
 
 
 class PlatformScrapeRequest(BaseModel):
@@ -803,6 +812,28 @@ async def smart_search_endpoint(request: SmartSearchRequest):
             platform: len(items) for platform, items in limited_platform_results.items()
         } if platform_results else {}
 
+        # Log AI filtering event (Stage 3: AI Filtering)
+        if request.session_id or request.device_id:
+            try:
+                ai_meta = result.ai_meta or {}
+                log_ai_processing_event(AIProcessingEventRequest(
+                    session_id=request.session_id,
+                    device_id=request.device_id,
+                    endpoint="smart-search",
+                    platform=None,  # Applies to all platforms
+                    ai_provider=ai_meta.get("provider", "unknown"),
+                    ai_model=ai_meta.get("model", "unknown"),
+                    is_fallback=ai_meta.get("fallback_reason") is not None,
+                    fallback_reason=ai_meta.get("fallback_reason"),
+                    products_input=len(products_dict),
+                    products_output=result.total_found,
+                    latency_ms=filter_ms,
+                    success=result.ai_powered,
+                    metadata={"query_understanding": result.query_understanding, "platform_counts": platform_counts}
+                ))
+            except Exception as log_err:
+                print(f"⚠️ Failed to log smart-search AI event: {log_err}")
+
         return {
             "query": request.query,
             "pincode": request.pincode,
@@ -851,6 +882,28 @@ async def match_products_endpoint(request: MatchProductsRequest):
                 "price_range": group.price_range,
                 "savings": group.savings
             })
+
+        # Log AI matching event (Stage 4: Product Matching)
+        if request.session_id or request.device_id:
+            try:
+                ai_meta = result.ai_meta or {}
+                log_ai_processing_event(AIProcessingEventRequest(
+                    session_id=request.session_id,
+                    device_id=request.device_id,
+                    endpoint="match-products",
+                    platform=None,  # Applies to all platforms
+                    ai_provider=ai_meta.get("provider", "unknown"),
+                    ai_model=ai_meta.get("model", "unknown"),
+                    is_fallback=ai_meta.get("fallback_reason") is not None,
+                    fallback_reason=ai_meta.get("fallback_reason"),
+                    products_input=len(products_dict),
+                    products_output=result.total_matched,
+                    latency_ms=match_ms,
+                    success=result.ai_powered,
+                    metadata={"total_groups": result.total_groups}
+                ))
+            except Exception as log_err:
+                print(f"⚠️ Failed to log match-products AI event: {log_err}")
 
         return {
             "ai_powered": result.ai_powered,
@@ -926,6 +979,50 @@ async def smart_search_and_match(request: SmartSearchRequest):
         platform_counts = {
             platform: len(items) for platform, items in limited_platform_results.items()
         } if platform_results else {}
+
+        # Log AI filtering event (Stage 3: AI Filtering)
+        if request.session_id or request.device_id:
+            try:
+                filter_ai_meta = filter_result.ai_meta or {}
+                log_ai_processing_event(AIProcessingEventRequest(
+                    session_id=request.session_id,
+                    device_id=request.device_id,
+                    endpoint="smart-search-and-match-filter",
+                    platform=None,
+                    ai_provider=filter_ai_meta.get("provider", "unknown"),
+                    ai_model=filter_ai_meta.get("model", "unknown"),
+                    is_fallback=filter_ai_meta.get("fallback_reason") is not None,
+                    fallback_reason=filter_ai_meta.get("fallback_reason"),
+                    products_input=len(products_dict),
+                    products_output=filter_result.total_found,
+                    latency_ms=filter_ms,
+                    success=filter_result.ai_powered,
+                    metadata={"query_understanding": filter_result.query_understanding}
+                ))
+            except Exception as log_err:
+                print(f"⚠️ Failed to log smart-search-and-match filter AI event: {log_err}")
+
+        # Log AI matching event (Stage 4: Product Matching)
+        if request.session_id or request.device_id:
+            try:
+                match_ai_meta = match_result.ai_meta or {}
+                log_ai_processing_event(AIProcessingEventRequest(
+                    session_id=request.session_id,
+                    device_id=request.device_id,
+                    endpoint="smart-search-and-match-match",
+                    platform=None,
+                    ai_provider=match_ai_meta.get("provider", "unknown"),
+                    ai_model=match_ai_meta.get("model", "unknown"),
+                    is_fallback=match_ai_meta.get("fallback_reason") is not None,
+                    fallback_reason=match_ai_meta.get("fallback_reason"),
+                    products_input=len(filtered_products),
+                    products_output=match_result.total_matched,
+                    latency_ms=match_ms,
+                    success=match_result.ai_powered,
+                    metadata={"total_groups": match_result.total_groups}
+                ))
+            except Exception as log_err:
+                print(f"⚠️ Failed to log smart-search-and-match AI event: {log_err}")
 
         return {
             "query": request.query,
@@ -1003,6 +1100,8 @@ async def ai_extract_products(request: AIExtractRequest):
                 detail="AI scraper not available - GEMINI_API_KEY not set"
             )
         
+        input_size_kb = len(request.html) / 1024
+        
         # Step 1: Extract products from HTML
         result = await ai_scraper.extract_products_from_html(
             html=request.html,
@@ -1013,6 +1112,33 @@ async def ai_extract_products(request: AIExtractRequest):
         )
         
         extracted_products = result.get("products", [])
+        
+        # Log AI extraction event (Stage 2: AI Extraction)
+        if request.session_id or request.device_id:
+            try:
+                extraction_ai_meta = {
+                    "provider": result.get("provider", "unknown"),
+                    "model": result.get("model", "unknown"),
+                }
+                log_ai_processing_event(AIProcessingEventRequest(
+                    session_id=request.session_id,
+                    device_id=request.device_id,
+                    endpoint="ai-extract",
+                    platform=request.platform,
+                    ai_provider=extraction_ai_meta.get("provider", "gemini"),
+                    ai_model=extraction_ai_meta.get("model", "unknown"),
+                    is_fallback=False,
+                    input_size_kb=input_size_kb,
+                    products_input=0,  # No input products for extraction
+                    products_output=len(extracted_products),
+                    latency_ms=result.get("latency_ms", 0),
+                    success=len(extracted_products) > 0,
+                    error_message=result.get("error"),
+                    metadata={"extraction_method": result.get("extraction_method"), "confidence": result.get("confidence")}
+                ))
+            except Exception as log_err:
+                print(f"⚠️ Failed to log AI extraction event: {log_err}")
+        
         if not extracted_products:
             return {
                 "platform": request.platform,
@@ -1037,6 +1163,28 @@ async def ai_extract_products(request: AIExtractRequest):
         
         relevant_products = filter_result.get("relevant_products", [])
         filtered_count = len(filter_result.get("filtered_out", []))
+        filter_ai_meta = filter_result.get("ai_meta", {})
+        
+        # Log AI filtering event (Stage 3: AI Filtering)
+        if request.session_id or request.device_id:
+            try:
+                log_ai_processing_event(AIProcessingEventRequest(
+                    session_id=request.session_id,
+                    device_id=request.device_id,
+                    endpoint="ai-filter",
+                    platform=request.platform,
+                    ai_provider=filter_ai_meta.get("provider", "unknown"),
+                    ai_model=filter_ai_meta.get("model", "unknown"),
+                    is_fallback=filter_ai_meta.get("fallback_reason") is not None,
+                    fallback_reason=filter_ai_meta.get("fallback_reason"),
+                    products_input=len(extracted_products),
+                    products_output=len(relevant_products),
+                    latency_ms=filter_ai_meta.get("latency_ms", 0),
+                    success=filter_result.get("ai_powered", False),
+                    metadata={"query_understanding": filter_result.get("query_understanding")}
+                ))
+            except Exception as log_err:
+                print(f"⚠️ Failed to log AI filter event: {log_err}")
         
         return {
             "platform": request.platform,
@@ -1049,7 +1197,7 @@ async def ai_extract_products(request: AIExtractRequest):
             "confidence": result.get("confidence", 0),
             "ai_powered": True,
             "filtered": filter_result.get("ai_powered", False),
-            "ai_meta": filter_result.get("ai_meta", {}),
+            "ai_meta": filter_ai_meta,
             "error": result.get("error")
         }
     except HTTPException:
@@ -1213,6 +1361,28 @@ async def smart_extract_and_filter(request: MultiPlatformExtractRequest):
                 "ai_powered": True
             }
         
+        # Log AI extraction events for each platform (Stage 2: AI Extraction)
+        if request.session_id or request.device_id:
+            for platform, result in extraction_result.get("results", {}).items():
+                try:
+                    log_ai_processing_event(AIProcessingEventRequest(
+                        session_id=request.session_id,
+                        device_id=request.device_id,
+                        endpoint="smart-extract-extraction",
+                        platform=platform,
+                        ai_provider=result.get("provider", "gemini"),
+                        ai_model=result.get("model", "unknown"),
+                        is_fallback=False,
+                        products_input=0,
+                        products_output=len(result.get("products", [])),
+                        latency_ms=result.get("latency_ms", 0),
+                        success=len(result.get("products", [])) > 0,
+                        error_message=result.get("error"),
+                        metadata={"extraction_method": result.get("extraction_method"), "confidence": result.get("confidence")}
+                    ))
+                except Exception as log_err:
+                    print(f"⚠️ Failed to log smart-extract extraction AI event for {platform}: {log_err}")
+        
         # Step 2: Filter relevant products
         filter_result = await smart_search.search(
             query=request.search_query,
@@ -1221,8 +1391,51 @@ async def smart_extract_and_filter(request: MultiPlatformExtractRequest):
         
         filtered_products = filter_result.get("products", all_products)
         
+        # Log AI filtering event (Stage 3: AI Filtering)
+        if request.session_id or request.device_id:
+            try:
+                filter_ai_meta = filter_result.get("ai_meta") or {}
+                log_ai_processing_event(AIProcessingEventRequest(
+                    session_id=request.session_id,
+                    device_id=request.device_id,
+                    endpoint="smart-extract-filter",
+                    platform=None,
+                    ai_provider=filter_ai_meta.get("provider", "unknown"),
+                    ai_model=filter_ai_meta.get("model", "unknown"),
+                    is_fallback=filter_ai_meta.get("fallback_reason") is not None,
+                    fallback_reason=filter_ai_meta.get("fallback_reason"),
+                    products_input=len(all_products),
+                    products_output=len(filtered_products),
+                    latency_ms=filter_ai_meta.get("latency_ms", 0),
+                    success=filter_result.get("ai_powered", False),
+                    metadata={"query_understanding": filter_result.get("query_understanding")}
+                ))
+            except Exception as log_err:
+                print(f"⚠️ Failed to log smart-extract filter AI event: {log_err}")
+        
         # Step 3: Match similar products
         match_result = await product_matcher.match_products(filtered_products)
+        
+        # Log AI matching event (Stage 4: Product Matching)
+        if request.session_id or request.device_id:
+            try:
+                match_ai_meta = match_result.ai_meta if hasattr(match_result, 'ai_meta') else {}
+                log_ai_processing_event(AIProcessingEventRequest(
+                    session_id=request.session_id,
+                    device_id=request.device_id,
+                    endpoint="smart-extract-match",
+                    platform=None,
+                    ai_provider=match_ai_meta.get("provider", "unknown") if match_ai_meta else "unknown",
+                    ai_model=match_ai_meta.get("model", "unknown") if match_ai_meta else "unknown",
+                    is_fallback=False,
+                    products_input=len(filtered_products),
+                    products_output=match_result.total_matched if hasattr(match_result, 'total_matched') else len(match_result.get("groups", [])),
+                    latency_ms=match_ai_meta.get("latency_ms", 0) if match_ai_meta else 0,
+                    success=match_result.ai_powered if hasattr(match_result, 'ai_powered') else True,
+                    metadata={"total_groups": match_result.total_groups if hasattr(match_result, 'total_groups') else len(match_result.get("groups", []))}
+                ))
+            except Exception as log_err:
+                print(f"⚠️ Failed to log smart-extract match AI event: {log_err}")
         
         return {
             "search_query": request.search_query,
