@@ -2212,6 +2212,7 @@ def get_session_pipeline_visualization(session_id: str) -> Dict[str, Any]:
         })
     
     # Process AI events by endpoint
+    ai_call_count = 0
     for event in detail.get('ai_events', []):
         endpoint = event.get('endpoint', 'unknown').lower()
         ai_call = {
@@ -2231,12 +2232,18 @@ def get_session_pipeline_visualization(session_id: str) -> Dict[str, Any]:
         # Order matters: check more specific patterns first
         if 'extract' in endpoint:
             pipeline['stage_2_ai_extraction']['calls'].append(ai_call)
+            ai_call_count += 1
         elif endpoint.endswith('-match') or endpoint == 'match-products':
             # Stage 4: Product matching (e.g., smart-search-and-match-match)
             pipeline['stage_4_matching']['calls'].append(ai_call)
+            ai_call_count += 1
         elif 'filter' in endpoint or 'smart-search' in endpoint:
             # Stage 3: Filtering (e.g., smart-search, smart-search-and-match-filter)
             pipeline['stage_3_filtering']['calls'].append(ai_call)
+            ai_call_count += 1
+    
+    # Update summary with actual AI call count
+    pipeline['summary']['total_ai_calls'] = ai_call_count
     
     return pipeline
 
